@@ -1432,321 +1432,8 @@ function extractScriptName(msg) {
   return m ? m[1] : null;
 }
 
-const SCREEN_SCRIPTS = {
-  TASK_SCREEN_11: {
-    name: 'Stock Adjustment (TASK_SCREEN_11)',
-    title: 'Stock Adjustment',
-    module: 'Inventory',
-    flow: ['ORG', 'ITEM', 'SUBINV', 'LOCATOR', 'QTY'],
-    pageEvents: {
-      'OnPageEntered': {
-        code: `// OnPageEntered\nlogger.info("Initializing TASK_SCREEN_11 for Stock Adjustment");\nflexi.removeObject("isStage");\nQTY.setValue("0");`
-      },
-      'Input Processor': {
-        code: `// Input Processor\nString input = $INPUT;\nlogger.debug("Raw screen scan input: " + input);\n// No barcode split patterns configured for TASK_SCREEN_11.`
-      },
-      'OnSpecialKeyPressed': {
-        code: `// OnSpecialKeyPressed\nint key = flexi.getSpecialKey();\nif (key == 13) { // Enter key\n  flexi.gotoComponent("ITEM");\n}`
-      }
-    },
-    inventory: [
-      { field: 'ORG', type: 'LOV', required: 'Yes', events: 'OnExit', webservice: 'ORG_LOV_WS' },
-      { field: 'ITEM', type: 'Text', required: 'Yes', events: 'OnExit', webservice: 'ITEM_VALIDATION_WS' },
-      { field: 'SUBINV', type: 'Text', required: 'No', events: 'OnExit', webservice: 'None' },
-      { field: 'LOCATOR', type: 'Text', required: 'No', events: 'OnExit', webservice: 'None' },
-      { field: 'QTY', type: 'Text', required: 'Yes', events: 'OnValidate', webservice: 'None' }
-    ],
-    dependencies: [
-      { type: 'visibility', title: 'Locator Hidden Rules', desc: 'LOCATOR field is setHidden(true) if SUBINV is not populated or equals "STAGE" (Stage locator transactions are automated).' },
-      { type: 'navigation', title: 'Dynamic Next Transition', desc: 'When ORG is verified, focus automatically navigates to ITEM. When SUBINV is stage, locator is skipped, and focus jumps straight to QTY.' }
-    ],
-    webservices: {
-      'ORG_LOV_WS': {
-        request: `GET https://api.internal/v1/orgs?status=ACTIVE`,
-        response: `{"organizations":[{"orgId":"ORG_01","orgName":"Primary SCM Warehouse"}]}`,
-        usedBy: 'ORG'
-      },
-      'ITEM_VALIDATION_WS': {
-        request: `GET https://api.internal/v1/items/{itemCode}`,
-        response: `{"itemCode":"ABC123","status":"APPROVED","description":"Standard SCM Item"}`,
-        usedBy: 'ITEM'
-      }
-    },
-    objects: [
-      { name: 'isStage', created: 'OnPageEntered / OnExit', used: 'OnExit', consumed: 'None' },
-      { name: 'ORACLE_SCM_ORG_ID', created: 'OnExit', used: 'Downstream APIs', consumed: 'API requests' }
-    ],
-    fields: {
-      'ORG': {
-        'OnExit': {
-          code: `// ORG_ONEXIT\nString org = ORG.getValue();\nlogger.info("Selected Organization: " + org);\nflexi.putSessionObject("ORACLE_SCM_ORG_ID", org);`,
-          review: 'Retrieves the Organization code entered by the user and binds it to the global session object for downstream API authorization checks.',
-          severity: 'low',
-          risk: 'Lacks validation check to confirm if the organization code exists or is active in the database before session binding.',
-          current: `String org = ORG.getValue();\nflexi.putSessionObject("ORACLE_SCM_ORG_ID", org);`,
-          improved: `String org = ORG.getValue();\nif (org != null && org.trim().length() > 0) {\n  // Query DB or check cache to validate Org status\n  if (validateOrgCode(org)) {\n    flexi.putSessionObject("ORACLE_SCM_ORG_ID", org);\n  } else {\n    flexi.setStatusMessage("Organization code is inactive or invalid.");\n  }\n} else {\n  flexi.setStatusMessage("Organization is required.");\n}`,
-          reason: 'Ensures the Organization exists and is active before committing it to session state, avoiding downstream transaction failures.'
-        }
-      },
-      'ITEM': {
-        'OnExit': {
-          code: `// ITEM_ONEXIT\nString itemCode = ITEM.getValue();\nlogger.debug("Validating item code: " + itemCode);\nif (itemCode.length() > 0) {\n  // Invoke item lookup validation\n  flexi.putObject("ITEM", itemCode);\n}`,
-          review: 'Triggers on field exit to validate the item code. Directly reads `.length()` without confirming if the item component itself is null.',
-          severity: 'medium',
-          risk: 'Unsafe string operation. Calling `.length()` on `itemCode` will throw a NullPointerException (NPE) if the item field is cleared or empty.',
-          current: `String itemCode = ITEM.getValue();\nif (itemCode.length() > 0) { ... }`,
-          improved: `String itemCode = (ITEM != null && ITEM.getValue() != null) ? ITEM.getValue().toString() : "";\nif (itemCode.trim().length() > 0) {\n  flexi.putObject("ITEM", itemCode);\n}`,
-          reason: 'Introduces a safe null-guard to ensure empty or skipped inputs do not cause runtime null reference crashes.'
-        }
-      },
-      'SUBINV': {
-        'OnExit': {
-          code: `// FIELD_VALIDATION (SUBINV_ONEXIT)\nString org = ORG.getValue();\nString item = ITEM.getValue();\n\nString subinv = SUBINV.getValue();\nif (subinv.equals("STAGE")) {\n  flexi.putObject("isStage", true);\n} else {\n  flexi.putObject("isStage", false);\n}`,
-          review: 'This is the code that caused the Null Reference Script Crash in your logs. If a user skips or leaves the subinventory empty, the component handle `SUBINV` is null, and calling `.getValue()` throws a TargetError.',
-          severity: 'critical',
-          risk: 'NullPointerException Risk. Directly references the widget and calls a method without null validation of the element context.',
-          current: `String subinv = SUBINV.getValue();\nif (subinv.equals("STAGE")) { ... }`,
-          improved: `if (SUBINV != null && SUBINV.getValue() != null) {\n  String subinv = SUBINV.getValue().toString();\n  if ("STAGE".equals(subinv)) {\n    flexi.putObject("isStage", true);\n  } else {\n    flexi.putObject("isStage", false);\n  }\n} else {\n  logger.warn("Subinventory input was empty or skipped.");\n  flexi.putObject("isStage", false);\n}`,
-          reason: 'Safely guards both the widget instance and the value, preventing a critical thread crash. Uses the safe Yoda condition `"STAGE".equals(subinv)` to avoid null reference checks on the string value itself.'
-        }
-      }
-    }
-  },
-  WO_COMPLETION: {
-    name: 'Work Order Completion (WO_COMPLETION)',
-    title: 'Work Order Completion',
-    module: 'Manufacturing',
-    flow: ['ORG', 'WORK_ORDER', 'ITEM', 'SUBINVENTORY', 'LOCATOR', 'LOT', 'SERIAL', 'QTY', 'CONFIRM'],
-    pageEvents: {
-      'OnPageEntered': {
-        code: `// OnPageEntered\nlogger.info("Loaded Work Order Completion screen.");\nflexi.putSessionObject("TRANS_TYPE", "WO_COMPLETE");`
-      },
-      'Input Processor': {
-        code: `// Barcode Input Parsing\nString input = $INPUT;\nlogger.debug("Received scanned barcode data: " + input);\n\n// Expected format: WO_NUM*ITEM_CODE*LOT_CODE\nString[] parts = input.split("\\\\*");\nString wo = parts[0];\nString item = parts[1];\nString lot = parts[2];\n\nflexi.putObject("WO_NUM", wo);\nflexi.putObject("ITEM", item);\nflexi.putObject("LOT", lot);`
-      },
-      'OnSpecialKeyPressed': {
-        code: `// OnSpecialKeyPressed\nint key = flexi.getSpecialKey();\nif (key == 9) { // Tab key\n  flexi.gotoComponent("CONFIRM");\n}`
-      }
-    },
-    inventory: [
-      { field: 'ORG', type: 'LOV', required: 'Yes', events: 'OnExit', webservice: 'ORG_LOV_WS' },
-      { field: 'WORK_ORDER', type: 'Text', required: 'Yes', events: 'Input Processor / OnExit', webservice: 'None' },
-      { field: 'ITEM', type: 'Text', required: 'Yes', events: 'OnExit', webservice: 'None' },
-      { field: 'SUBINVENTORY', type: 'Text', required: 'Yes', events: 'OnExit', webservice: 'None' },
-      { field: 'LOCATOR', type: 'Text', required: 'No', events: 'OnExit', webservice: 'None' },
-      { field: 'LOT', type: 'Text', required: 'Yes', events: 'OnExit', webservice: 'None' },
-      { field: 'SERIAL', type: 'Text', required: 'No', events: 'OnExit', webservice: 'None' },
-      { field: 'QTY', type: 'Text', required: 'Yes', events: 'OnValidate', webservice: 'None' },
-      { field: 'CONFIRM', type: 'Button', required: 'No', events: 'OnClick', webservice: 'WO_COMPLETE_WS' }
-    ],
-    dependencies: [
-      { type: 'visibility', title: 'Serial Control Visibility', desc: 'SERIAL field setHidden(false) only if the ITEM is defined as Serial Controlled in SCM Master.' },
-      { type: 'visibility', title: 'Lot Control Visibility', desc: 'LOT field setHidden(false) only if the ITEM is defined as Lot Controlled in SCM Master.' },
-      { type: 'navigation', title: 'Work Order Autofill', desc: 'Scanning a barcode with WO*ITEM*LOT parses the data, updates the WORK_ORDER, ITEM, and LOT fields, and jumps the cursor focus directly to QTY.' }
-    ],
-    webservices: {
-      'WO_COMPLETE_WS': {
-        request: `POST https://api.internal/v1/workOrders/complete\nPayload: {"woNum":"{WO_NUM}","itemCode":"{ITEM}","lotNum":"{LOT}","qty":{QTY}}`,
-        response: `{"transactionId":"TXN_9988","status":"SUCCESS","message":"Work Order Completed successfully"}`,
-        usedBy: 'CONFIRM'
-      }
-    },
-    objects: [
-      { name: 'WO_NUM', created: 'Input Processor / OnExit', used: 'Downstream scripts', consumed: 'WO_COMPLETE_WS' },
-      { name: 'TRANS_TYPE', created: 'OnPageEntered', used: 'None', consumed: 'None' }
-    ],
-    fields: {
-      'Input Processor': {
-        'OnValidate': {
-          code: `// Barcode Input Parsing\nString input = $INPUT;\nlogger.debug("Received scanned barcode data: " + input);\n\n// Expected format: WO_NUM*ITEM_CODE*LOT_CODE\nString[] parts = input.split("\\\\*");\nString wo = parts[0];\nString item = parts[1];\nString lot = parts[2];\n\nflexi.putObject("WO_NUM", wo);\nflexi.putObject("ITEM", item);\nflexi.putObject("LOT", lot);`,
-          review: 'Splits raw scanner barcode input by asterisks and maps indices directly to Work Order, Item, and Lot properties.',
-          severity: 'high',
-          risk: 'ArrayIndex Risk. If the scanned barcode is malformed, short, or does not contain all three parts (e.g. `WO12345*ITEMABC` without a lot), accessing `parts[2]` throws an ArrayIndexOutOfBoundsException.',
-          current: `String[] parts = input.split("\\\\*");\nString lot = parts[2];`,
-          improved: `String[] parts = input != null ? input.split("\\\\*") : new String[0];\nif (parts.length >= 3) {\n  flexi.putObject("WO_NUM", parts[0]);\n  flexi.putObject("ITEM", parts[1]);\n  flexi.putObject("LOT", parts[2]);\n} else {\n  flexi.setStatusMessage("Invalid barcode scan. Expected: WO*ITEM*LOT");\n  logger.warn("Malformed scan received: " + input);\n}`,
-          reason: 'Verifies the array split length before accessing indexes, returning a graceful status message to the user instead of throwing a stack trace.'
-        }
-      },
-      'WORK_ORDER': {
-        'OnExit': {
-          code: `// WORK_ORDER_ONEXIT\nString wo = WORK_ORDER.getValue();\nflexi.putSessionObject("WO_NUM", wo);\nlogger.info("Active Work Order updated: " + wo);`,
-          review: 'Stores the current Work Order ID in the session context on field exit.',
-          severity: 'low',
-          risk: 'Allows empty or invalid Work Order references to be set into active session states.',
-          current: `String wo = WORK_ORDER.getValue();\nflexi.putSessionObject("WO_NUM", wo);`,
-          improved: `if (WORK_ORDER != null && WORK_ORDER.getValue() != null) {\n  String wo = WORK_ORDER.getValue().toString().trim();\n  if (wo.length() > 0) {\n    flexi.putSessionObject("WO_NUM", wo);\n  }\n}`,
-          reason: 'Prevents empty work order IDs from polluting session objects.'
-        }
-      }
-    }
-  },
-  RECEIPT_SCREEN_04: {
-    name: 'Goods Receipt (RECEIPT_SCREEN_04)',
-    title: 'Goods Receipt',
-    module: 'Receiving',
-    flow: ['ORG', 'SHIPMENT', 'ITEM', 'QTY', 'RECEIVE'],
-    pageEvents: {
-      'OnPageEntered': {
-        code: `// OnPageEntered\nlogger.info("Loading Goods Receipt (RECEIPT_SCREEN_04)");\nflexi.putSessionObject("ACTIVE_VIEW", "RECEIVING");`
-      },
-      'Input Processor': {
-        code: `// Input Processor\nString input = $INPUT;\nlogger.debug("Received scanned barcode data: " + input);\n// Parses barcodes like SHIPMENT_ID*ITEM_CODE\nString[] parts = input.split("\\\\*");\nif (parts.length >= 2) {\n  flexi.putObject("SHIPMENT_ID", parts[0]);\n  flexi.putObject("ITEM", parts[1]);\n}`
-      },
-      'OnSpecialKeyPressed': {
-        code: `// OnSpecialKeyPressed\nint key = flexi.getSpecialKey();\nif (key == 115) { // F4 key\n  flexi.gotoComponent("SHIPMENT");\n}`
-      }
-    },
-    inventory: [
-      { field: 'ORG', type: 'LOV', required: 'Yes', events: 'OnExit', webservice: 'ORG_LOV_WS' },
-      { field: 'SHIPMENT', type: 'Text', required: 'Yes', events: 'OnExit', webservice: 'None' },
-      { field: 'ITEM', type: 'Text', required: 'Yes', events: 'OnExit', webservice: 'ITEM_SERVICE' },
-      { field: 'QTY', type: 'Text', required: 'Yes', events: 'OnValidate', webservice: 'None' },
-      { field: 'RECEIVE', type: 'Button', required: 'No', events: 'OnClick', webservice: 'RECEIVE_TXN_WS' }
-    ],
-    dependencies: [
-      { type: 'visibility', title: 'Organization Check', desc: 'All fields below ORG are setHidden(true) until a valid SCM Org ID is selected and bound to the session.' },
-      { type: 'navigation', title: 'Barcode Auto-Routing', desc: 'Scanning a barcode with Shipment*Item splits the input, updates the fields, calls ITEM_SERVICE lookup, and jumps the cursor to QTY.' }
-    ],
-    webservices: {
-      'ITEM_SERVICE': {
-        request: `GET https://api.internal/v2/items?code={itemCode}`,
-        response: `{"items":[{"itemCode":"ABC123","description":"SCM Item Class A","lotControlled":true}]}`,
-        usedBy: 'ITEM'
-      },
-      'RECEIVE_TXN_WS': {
-        request: `POST https://api.internal/v1/receiving/receipts\nPayload: {"orgId":"{ORG}","shipmentId":"{SHIPMENT}","item":"{ITEM}","qty":{QTY}}`,
-        response: `{"receiptNumber":"REC_5544","status":"SUCCESS"}`,
-        usedBy: 'RECEIVE'
-      }
-    },
-    objects: [
-      { name: 'ITEM_DESC', created: 'ITEM: OnExit', used: 'Display UI label', consumed: 'None' },
-      { name: 'ACTIVE_VIEW', created: 'OnPageEntered', used: 'App Navigation', consumed: 'None' }
-    ],
-    fields: {
-      'ITEM': {
-        'OnExit': {
-          code: `// ITEM_ONEXIT - Call WebService lookup\nString item = ITEM.getValue();\nlogger.info("Querying Master Item Database for: " + item);\n\n// Execute WebService call\nITEM_SERVICE.callWebService();\nJSONObject itemInfo = new JSONObject(ITEM_SERVICE.getRawResponse());\nJSONArray items = itemInfo.getJSONArray("items");\nString desc = items.getJSONObject(0).getString("description");\nflexi.putObject("ITEM_DESC", desc);`,
-          review: 'Runs an API query for item validation on field exit, then parses the JSON response to extract description.',
-          severity: 'critical',
-          risk: 'JSON Schema Mismatch & Null Safety. If the API returns a non-200 code (e.g. 403 or 404), or if the item code is invalid and the "items" array is empty, accessing `items.getJSONObject(0)` throws a JSONException and crashes the script.',
-          current: `JSONArray items = itemInfo.getJSONArray("items");\nString desc = items.getJSONObject(0).getString("description");`,
-          improved: `if (ITEM_SERVICE.getResponseCode() == 200) {\n  JSONObject itemInfo = new JSONObject(ITEM_SERVICE.getRawResponse());\n  if (itemInfo.has("items")) {\n    JSONArray items = itemInfo.getJSONArray("items");\n    if (items.length() > 0) {\n      String desc = items.getJSONObject(0).optString("description", "No Description");\n      flexi.putObject("ITEM_DESC", desc);\n    } else {\n      flexi.setStatusMessage("ITEM does not exist in Item Master");\n    }\n  }\n} else {\n  logger.error("API Error: " + ITEM_SERVICE.getResponseCode());\n  flexi.setStatusMessage("Item lookup failed. Service unavailable.");\n}`,
-          reason: 'Validates the HTTP Response Code before parsing response bodies. Safely inspects JSON key existence and array length to prevent downstream crashes.'
-        }
-      },
-      'QTY': {
-        'OnValidate': {
-          code: `// QTY_ONVALIDATE\nString qtyStr = QTY.getValue();\ndouble qty = Double.parseDouble(qtyStr);\nif (qty == 0) {\n  flexi.setStatusMessage("Quantity cannot be zero");\n}`,
-          review: 'Validates that receipt quantity is non-zero before database commit.',
-          severity: 'medium',
-          risk: 'Unsafe Number Parse. `Double.parseDouble` throws a NumberFormatException if the user types alphabetic characters or symbols, causing a transaction abort.',
-          current: `double qty = Double.parseDouble(qtyStr);\nif (qty == 0) { ... }`,
-          improved: `if (QTY != null && QTY.getValue() != null) {\n  try {\n    double qty = Double.parseDouble(QTY.getValue().toString());\n    if (qty <= 0) {\n      flexi.setStatusMessage("TRANSACTION QTY cannot be negative or zero");\n      return;\n    }\n  } catch (NumberFormatException e) {\n    flexi.setStatusMessage("Invalid quantity format. Numeric value required.");\n  }\n}`,
-          reason: 'Safely parses numeric inputs using try-catch blocks and checks for negative quantities.'
-        }
-      }
-    }
-  },
-  PICK_CONFIRM: {
-    name: 'Pick Confirmation (PICK_CONFIRM)',
-    title: 'Pick Confirmation',
-    module: 'Outbound',
-    flow: ['CFM_ITEM_NEW', 'LOT', 'SUBINV', 'LOCATOR', 'QTY', 'CONFIRM'],
-    pageEvents: {
-      'OnPageEntered': {
-        code: `// OnPageEntered\nlogger.info("Initializing Pick Confirmation flow.");\nflexi.putSessionObject("ACTIVE_FLOW", "OUTBOUND");`
-      },
-      'Input Processor': {
-        code: `// Barcode parsing\nString input = $INPUT;\nlogger.debug("Received scanned barcode data: " + input);\n// Parses barcodes like ITEM_CODE*LOT_CODE*SUBINV_CODE\nString[] parts = input.split("\\\\*");\nif (parts.length >= 3) {\n  flexi.putObject("ITEM", parts[0]);\n  flexi.putObject("LOT", parts[1]);\n  flexi.putObject("SUBINV", parts[2]);\n}`
-      },
-      'OnSpecialKeyPressed': {
-        code: `// OnSpecialKeyPressed\nint key = flexi.getSpecialKey();\nif (key == 13) { // Enter key\n  flexi.gotoComponent("CONFIRM");\n}`
-      }
-    },
-    inventory: [
-      { field: 'CFM_ITEM_NEW', type: 'Text', required: 'Yes', events: 'Input Processor / OnExit / OnChange', webservice: 'CROSS_REF_WS' },
-      { field: 'LOT', type: 'Text', required: 'Yes', events: 'OnExit', webservice: 'None' },
-      { field: 'SUBINV', type: 'Text', required: 'Yes', events: 'OnExit', webservice: 'None' },
-      { field: 'LOCATOR', type: 'Text', required: 'No', events: 'OnExit', webservice: 'None' },
-      { field: 'QTY', type: 'Text', required: 'Yes', events: 'OnValidate', webservice: 'None' },
-      { field: 'CONFIRM', type: 'Button', required: 'No', events: 'OnClick', webservice: 'CONFIRM_PICK_WS' }
-    ],
-    dependencies: [
-      { type: 'visibility', title: 'Lot Input visibility', desc: 'LOT field is shown dynamically if the item code mapped in CFM_ITEM_NEW requires Lot control in ERP SCM database.' },
-      { type: 'navigation', title: 'Dynamic Next Transition', desc: 'When CFM_ITEM_NEW matches cross-references, focus moves to LOT. If lot is skipped, jumps focus to SUBINV.' }
-    ],
-    webservices: {
-      'CROSS_REF_WS': {
-        request: `GET https://api.internal/v1/crossReferences?item={itemCode}`,
-        response: `{"itemCode":"ABC123","crossReferences":["CROSS_REF_01"]}`,
-        usedBy: 'CFM_ITEM_NEW'
-      },
-      'CONFIRM_PICK_WS': {
-        request: `POST https://api.internal/v1/outbound/picks/confirm\nPayload: {"item":"{ITEM}","lot":"{LOT}","qty":{QTY}}`,
-        response: `{"pickStatus":"CONFIRMED","transactionId":"TXN_4433"}`,
-        usedBy: 'CONFIRM'
-      }
-    },
-    objects: [
-      { name: 'ITEM_VAL', created: 'Input Processor', used: 'OnExit', consumed: 'CONFIRM_PICK_WS' },
-      { name: 'ACTIVE_FLOW', created: 'OnPageEntered', used: 'None', consumed: 'None' }
-    ],
-    fields: {
-      'LOCATOR': {
-        'OnExit': {
-          code: `// LOCATOR_ONEXIT\nString loc = LOCATOR.getValue();\nlogger.debug("Selected Locator: " + loc);`,
-          review: 'Inspects active locator slot.',
-          severity: 'low',
-          risk: 'No null guards or format validation check.',
-          current: `String loc = LOCATOR.getValue();`,
-          improved: `String loc = (LOCATOR != null && LOCATOR.getValue() != null) ? LOCATOR.getValue().toString() : "";`,
-          reason: 'Defensive coding pattern.'
-        }
-      },
-      'LOT': {
-        'OnFocus': {
-          code: `// LOT_ONFOCUS\nLOT.setValue("LOT-DEFAULT");`,
-          review: 'Populates default lot code.',
-          severity: 'low',
-          risk: 'Low risk. Directly sets value.',
-          current: `LOT.setValue("LOT-DEFAULT");`,
-          improved: `if (LOT != null) {\n  LOT.setValue("LOT-DEFAULT");\n}`,
-          reason: 'Validates control handle presence.'
-        }
-      }
-    }
-  }
-};
-
 function getActiveScreenDefinition() {
-  if (STATE.screenDefinition) {
-    return STATE.screenDefinition;
-  }
-  if (STATE.analysis) {
-    let logScreen = STATE.analysis.screen;
-    if (!logScreen) {
-      const logText = STATE.parsed.map(e => e.message).join('\n');
-      const filename = (STATE.currentFile || "").toLowerCase();
-      const logTextLower = logText.toLowerCase();
-      if (filename.includes("receipt") || logTextLower.includes("receipt") || logTextLower.includes("receiptservice") || logTextLower.includes("receiver")) {
-        logScreen = "RECEIPT_SCREEN_04";
-      } else if (filename.includes("wo_completion") || logTextLower.includes("work order") || logTextLower.includes("wo_complete") || logTextLower.includes("manufacturing")) {
-        logScreen = "WO_COMPLETION";
-      } else if (filename.includes("pick_confirm") || logTextLower.includes("pick confirm") || logTextLower.includes("outbound")) {
-        logScreen = "PICK_CONFIRM";
-      } else if (filename.includes("null_pointer") || logTextLower.includes("task_screen_11") || logTextLower.includes("stock adjustment") || logTextLower.includes("inventory")) {
-        logScreen = "TASK_SCREEN_11";
-      } else {
-        logScreen = "TASK_SCREEN_11";
-      }
-    }
-    const matchedKey = Object.keys(SCREEN_SCRIPTS).find(k => k === logScreen || (logScreen && logScreen.includes(k)));
-    if (matchedKey) {
-      return SCREEN_SCRIPTS[matchedKey];
-    }
-  }
-  return SCREEN_SCRIPTS.TASK_SCREEN_11;
+  return STATE.screenDefinition || null;
 }
 
 function refreshCodeReviewerView() {
@@ -2950,7 +2637,8 @@ function generateAIAnswer(q) {
   // --- New Code Reviewer & Screen Explorer commands ---
   if (/screen flow|show.*flow/i.test(q)) {
     const scr = a.screen || 'TASK_SCREEN_11';
-    const sData = SCREEN_SCRIPTS[scr] || SCREEN_SCRIPTS['TASK_SCREEN_11'];
+    const sData = getActiveScreenDefinition();
+    if (!sData) return '⚠️ No screen definition loaded. Please upload a Screen JSON file.';
     const flowStr = sData.flow.join(' → ');
     return `🔍 <strong>Screen Flow for ${escHtml(scr)}:</strong><br><br><code>${escHtml(flowStr)}</code><br><br><em>Tip: Open the <strong>Code Reviewer</strong> tab and click the <strong>Screen Flow & Inventory</strong> sub-tab to see the interactive flow viz.</em>`;
   }
@@ -2959,7 +2647,8 @@ function generateAIAnswer(q) {
     const mMatch = q.match(/field\s*(\w+)/i);
     const fieldQuery = mMatch ? mMatch[1].toUpperCase() : null;
     const scr = a.screen || 'TASK_SCREEN_11';
-    const sData = SCREEN_SCRIPTS[scr] || SCREEN_SCRIPTS['TASK_SCREEN_11'];
+    const sData = getActiveScreenDefinition();
+    if (!sData) return '⚠️ No screen definition loaded. Please upload a Screen JSON file.';
     if (fieldQuery && sData.fields[fieldQuery]) {
       const events = sData.fields[fieldQuery];
       let resp = `💻 <strong>Event Code for ${escHtml(fieldQuery)} on ${escHtml(scr)}:</strong><br>`;
@@ -2973,7 +2662,8 @@ function generateAIAnswer(q) {
 
   if (/show.*code.*(onexit|onchange|onvalidate|input processor|onpageentered|onspecialkeypressed)/i.test(q) || /(onexit|onchange|onvalidate|input processor|onpageentered|onspecialkeypressed).*code/i.test(q)) {
     const scr = a.screen || 'TASK_SCREEN_11';
-    const sData = SCREEN_SCRIPTS[scr] || SCREEN_SCRIPTS['TASK_SCREEN_11'];
+    const sData = getActiveScreenDefinition();
+    if (!sData) return '⚠️ No screen definition loaded. Please upload a Screen JSON file.';
     const evQuery = q.match(/(onexit|onchange|onvalidate|input processor|onpageentered|onspecialkeypressed)/i)[1].toLowerCase();
     
     // Check page events
@@ -2998,7 +2688,8 @@ function generateAIAnswer(q) {
 
   if (/related api|apis/i.test(q)) {
     const scr = a.screen || 'TASK_SCREEN_11';
-    const sData = SCREEN_SCRIPTS[scr] || SCREEN_SCRIPTS['TASK_SCREEN_11'];
+    const sData = getActiveScreenDefinition();
+    if (!sData) return '⚠️ No screen definition loaded. Please upload a Screen JSON file.';
     if (Object.keys(sData.webservices).length === 0) return `No associated APIs configured for ${escHtml(scr)}.`;
     const apisList = Object.entries(sData.webservices).map(([name, ws]) => `• <strong>${escHtml(name)}</strong> (Called by field: <code>${escHtml(ws.usedBy)}</code>)<br>Endpoint: <code>${escHtml(ws.request)}</code>`).join('<br><br>');
     return `🌐 <strong>WebService Mapping for ${escHtml(scr)}:</strong><br><br>${apisList}`;
@@ -3006,14 +2697,16 @@ function generateAIAnswer(q) {
 
   if (/dependent field|dependency|visibility|rules/i.test(q)) {
     const scr = a.screen || 'TASK_SCREEN_11';
-    const sData = SCREEN_SCRIPTS[scr] || SCREEN_SCRIPTS['TASK_SCREEN_11'];
+    const sData = getActiveScreenDefinition();
+    if (!sData) return '⚠️ No screen definition loaded. Please upload a Screen JSON file.';
     const depsList = sData.dependencies.map(d => `• <strong>${escHtml(d.title)}</strong> (${escHtml(d.type)}): ${escHtml(d.desc)}`).join('<br><br>');
     return `⛓️ <strong>Screen Dependency Graph & Logic for ${escHtml(scr)}:</strong><br><br>${depsList}`;
   }
 
   if (/review.*screen|review.*field|risky.*code|vulnerability|missing.*validation/i.test(q)) {
     const scr = a.screen || 'TASK_SCREEN_11';
-    const sData = SCREEN_SCRIPTS[scr] || SCREEN_SCRIPTS['TASK_SCREEN_11'];
+    const sData = getActiveScreenDefinition();
+    if (!sData) return '⚠️ No screen definition loaded. Please upload a Screen JSON file.';
     let risks = [];
     for (const [fieldName, events] of Object.entries(sData.fields)) {
       for (const [evName, ev] of Object.entries(events)) {
@@ -3190,31 +2883,6 @@ function runScreenDebuggerAnalysis() {
   // Find screen definition
   let screenDef = STATE.screenDefinition;
   let isSimulated = false;
-  if (!screenDef) {
-    let logScreen = STATE.analysis.screen;
-    if (!logScreen) {
-      // Fallback detection based on log file keywords or filename
-      const filename = (STATE.currentFile || "").toLowerCase();
-      const logTextLower = logText.toLowerCase();
-      if (filename.includes("receipt") || logTextLower.includes("receipt") || logTextLower.includes("receiptservice") || logTextLower.includes("receiver")) {
-        logScreen = "RECEIPT_SCREEN_04";
-      } else if (filename.includes("wo_completion") || logTextLower.includes("work order") || logTextLower.includes("wo_complete") || logTextLower.includes("manufacturing")) {
-        logScreen = "WO_COMPLETION";
-      } else if (filename.includes("pick_confirm") || logTextLower.includes("pick confirm") || logTextLower.includes("outbound")) {
-        logScreen = "PICK_CONFIRM";
-      } else if (filename.includes("null_pointer") || logTextLower.includes("task_screen_11") || logTextLower.includes("stock adjustment") || logTextLower.includes("inventory")) {
-        logScreen = "TASK_SCREEN_11";
-      } else {
-        // Fallback default to first script definition
-        logScreen = "TASK_SCREEN_11";
-      }
-    }
-    const matchedKey = Object.keys(SCREEN_SCRIPTS).find(k => k === logScreen || (logScreen && logScreen.includes(k)));
-    if (matchedKey) {
-      screenDef = SCREEN_SCRIPTS[matchedKey];
-      isSimulated = true;
-    }
-  }
 
   if (!screenDef) {
     $('dbg-screen-title').textContent = "No Screen Matching Log";
