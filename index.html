@@ -96,16 +96,7 @@
       <input type="file" id="file-input" style="display:none" accept=".log,.txt,.json,.xml,.csv,.zip">
       <div class="sidebar-file-name" id="sidebar-file-name">No file loaded</div>
 
-      <button class="upload-btn-sidebar" id="upload-screen-btn" style="margin-top: 10px; background: rgba(59, 130, 246, 0.06); border-color: rgba(59, 130, 246, 0.2); color: #60A5FA;">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-          <line x1="8" y1="21" x2="16" y2="21" />
-          <line x1="12" y1="17" x2="12" y2="21" />
-        </svg>
-        Upload Screen JSON
-      </button>
-      <input type="file" id="screen-input" style="display:none" accept=".json">
-      <div class="sidebar-file-name" id="sidebar-screen-name">No Screen JSON loaded</div>
+      
     </div>
 
     <!-- Paste -->
@@ -166,14 +157,6 @@
           <line x1="6" y1="18" x2="6.01" y2="18"/>
         </svg>
         API Tracker
-      </button>
-
-      <button class="nav-item" data-view="codereview" id="nav-codereview">
-        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <polyline points="16 18 22 12 16 6" />
-          <polyline points="8 6 2 12 8 18" />
-        </svg>
-        Code Reviewer
       </button>
 
       <button class="nav-item" data-view="debugger" id="nav-debugger">
@@ -876,78 +859,6 @@
       </div>
 
       <!-- ═══════════ CODE REVIEWER VIEW ═══════════ -->
-      <div class="view" id="view-codereview">
-        <div class="view-title">Code Reviewer & Risk Detector</div>
-        <div class="view-subtitle">Review event scripts and configurations for the active screen. Analyze vulnerabilities, null safety risks, and view suggested fixes.</div>
-
-        <div class="api-tracker-layout">
-          <!-- Left Panel: Screen and Fields -->
-          <div class="api-list-panel">
-            <div class="api-list-header" style="display:flex; flex-direction:column; gap:10px; padding:15px; border-bottom:1px solid rgba(255,255,255,0.06);">
-              <div style="font-size:11px; font-weight:700; color:#6B7280; letter-spacing: 0.5px;">ACTIVE LOG SCREEN</div>
-              <div id="code-screen-info" style="font-size:14px; font-weight:700; color:#F8FAFC; padding:4px 0;">TASK_SCREEN_11 (Stock Adjustment)</div>
-              <div id="code-screen-meta-desc" style="font-size:11px; color:#94A3B8;">Module: Inventory</div>
-            </div>
-            <div class="api-list" id="code-fields-container" style="padding:10px 0;">
-              <!-- Dynamic Field & Event tree will be injected here -->
-            </div>
-          </div>
-
-          <!-- Right Panel: Code Editor and Review Summary -->
-          <div class="api-details-panel" id="code-details-panel" style="display:flex; flex-direction:column; overflow:hidden;">
-            <!-- Tab Headers -->
-            <div class="code-details-tabs" style="display:flex; border-bottom:1px solid var(--border); padding: 0 16px; background:#F8FAFC; border-radius:12px 12px 0 0; gap: 20px; flex-shrink:0;">
-              <button class="code-tab-btn active" data-tab="flow" style="padding:14px 4px; border:none; background:none; font-family:inherit; font-size:13px; font-weight:600; color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer;">🔍 Screen Flow & Inventory</button>
-              <button class="code-tab-btn" data-tab="review" style="padding:14px 4px; border:none; background:none; font-family:inherit; font-size:13px; font-weight:600; color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer;">💻 Event Code Review</button>
-              <button class="code-tab-btn" data-tab="maps" style="padding:14px 4px; border:none; background:none; font-family:inherit; font-size:13px; font-weight:600; color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer;">📦 API & Object Maps</button>
-              <button class="code-tab-btn" data-tab="page" style="padding:14px 4px; border:none; background:none; font-family:inherit; font-size:13px; font-weight:600; color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer;">📄 Page Events</button>
-            </div>
-
-            <!-- Tab Contents -->
-            <div class="code-tab-content active" id="tab-content-flow" style="padding:24px; flex-grow:1; overflow-y:auto;">
-              <div class="api-details-empty">
-                <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-                  <polyline points="16 18 22 12 16 6" />
-                  <polyline points="8 6 2 12 8 18" />
-                </svg>
-                <h3>No Screen Loaded</h3>
-                <p>Upload a log file or select a screen in the left dropdown to reconstruct the screen metadata, flow, and field inventories.</p>
-              </div>
-            </div>
-
-            <div class="code-tab-content" id="tab-content-review" style="padding:24px; flex-grow:1; overflow-y:auto;">
-              <div class="api-details-empty">
-                <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-                  <polyline points="16 18 22 12 16 6" />
-                </svg>
-                <h3>No Event Script Selected</h3>
-                <p>Select a field event handler from the left sidebar tree to run the Code Reviewer and display refactoring options.</p>
-              </div>
-            </div>
-
-            <div class="code-tab-content" id="tab-content-maps" style="padding:24px; flex-grow:1; overflow-y:auto;">
-              <div class="api-details-empty">
-                <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
-                </svg>
-                <h3>No Screen Loaded</h3>
-                <p>API and object session mappings will populate once a screen is active.</p>
-              </div>
-            </div>
-
-            <div class="code-tab-content" id="tab-content-page" style="padding:24px; flex-grow:1; overflow-y:auto;">
-              <div class="api-details-empty">
-                <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                <h3>No Page Events Loaded</h3>
-                <p>Page-level event handlers (OnPageEntered, Input Processor, etc.) will populate once a screen is active.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- ═══════════ SCREEN DEBUGGER VIEW ═══════════ -->
       <div class="view" id="view-debugger">
         <div class="view-title">Screen Debugger AI</div>

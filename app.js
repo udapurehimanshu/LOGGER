@@ -1432,41 +1432,6 @@ function extractScriptName(msg) {
   return m ? m[1] : null;
 }
 
-function getActiveScreenDefinition() {
-  return STATE.screenDefinition || null;
-}
-
-function refreshCodeReviewerView() {
-  const data = getActiveScreenDefinition();
-  if (!data) return;
-
-  const name = data.screenName || data.name || "Unknown Screen";
-  const title = data.title || name;
-  const module = data.module || "General";
-  
-  const infoEl = document.getElementById('code-screen-info');
-  if (infoEl) {
-    if (name.includes(title)) {
-      infoEl.textContent = name;
-    } else {
-      infoEl.textContent = `${title} (${name})`;
-    }
-  }
-  
-  const metaEl = document.getElementById('code-screen-meta-desc');
-  if (metaEl) metaEl.textContent = `Module: ${module}`;
-
-  STATE.codeReviewState = { screenId: name, fieldName: null, eventName: null };
-  renderFieldsTree();
-  
-  // Switch to flow tab by default
-  const flowTabBtn = document.querySelector('.code-tab-btn[data-tab="flow"]');
-  if (flowTabBtn) flowTabBtn.click();
-  
-  renderFlowTab();
-  renderMapsTab();
-  renderPageEventsTab();
-}
 
 function showScreenLoadingUI(filename) {
   const title = document.getElementById('upload-loading-title');
@@ -1495,30 +1460,6 @@ function showScreenLoadingUI(filename) {
   if (warningEl) { warningEl.style.display = 'none'; }
 }
 
-function initCodeReviewer() {
-  // Add click listeners to sub-tabs
-  const tabButtons = document.querySelectorAll('.code-tab-btn');
-  tabButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabButtons.forEach(b => {
-        b.classList.remove('active');
-        b.style.color = 'var(--text-muted)';
-        b.style.borderBottomColor = 'transparent';
-      });
-      btn.classList.add('active');
-      btn.style.color = 'var(--primary)';
-      btn.style.borderBottomColor = 'var(--primary)';
-
-      const tabId = btn.dataset.tab;
-      document.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
-      const activeContent = document.getElementById('tab-content-' + tabId);
-      if (activeContent) activeContent.classList.add('active');
-    });
-  });
-
-  // Render initial screen
-  refreshCodeReviewerView();
-}
 
 function renderFieldsTree() {
   const container = document.getElementById('code-fields-container');
@@ -2812,55 +2753,6 @@ function generateAIAnswer(q) {
 <pre style="font-family:'Fira Code', monospace; background:#0F172A; color:#E2E8F0; padding:15px; border-radius:8px; overflow-x:auto; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all;">${escHtml(reportText)}</pre>`;
 }
 
-function handleScreenSelect(file) {
-  showScreenLoadingUI(file.name);
-  const reader = new FileReader();
-  reader.onload = async ev => {
-    try {
-      const progressFill = pct => {
-        const fill = document.getElementById('upload-progress-fill');
-        if (fill) fill.style.width = pct + '%';
-        const cardFill = document.getElementById('upload-card-progress-fill');
-        if (cardFill) cardFill.style.width = pct + '%';
-      };
-
-      progressFill(25);
-      await new Promise(r => setTimeout(r, 200));
-      progressFill(60);
-      await new Promise(r => setTimeout(r, 250));
-      progressFill(90);
-      await new Promise(r => setTimeout(r, 200));
-
-      const data = JSON.parse(ev.target.result);
-      if (!data.screenName && !data.title) {
-        hideLoadingUI();
-        alert("Invalid Screen JSON format. Must contain 'screenName' or 'title'.");
-        return;
-      }
-      
-      STATE.screenDefinition = data;
-      STATE.currentScreenFile = file.name;
-      document.getElementById('sidebar-screen-name').textContent = file.name;
-      
-      progressFill(100);
-      await new Promise(r => setTimeout(r, 150));
-      hideLoadingUI();
-      
-      if (STATE.analysis) {
-        runScreenDebuggerAnalysis();
-      }
-      refreshCodeReviewerView();
-      
-      alert(`Successfully loaded Screen JSON: ${data.screenName || data.title}`);
-    } catch(err) {
-      console.error(err);
-      hideLoadingUI();
-      alert("Error parsing Screen JSON file.");
-    }
-  };
-  reader.readAsText(file);
-}
-
 function runScreenDebuggerAnalysis() {
   const $ = id => document.getElementById(id);
   if (!STATE.analysis) {
@@ -2881,23 +2773,7 @@ function runScreenDebuggerAnalysis() {
   const logText = STATE.parsed.map(e => e.message).join('\n');
 
   // Find screen definition
-  let screenDef = STATE.screenDefinition;
-  let isSimulated = false;
-
-  if (!screenDef) {
-    $('dbg-screen-title').textContent = "No Screen Matching Log";
-    $('dbg-screen-meta').textContent = "Log was loaded but we found no matching screen definition. Please upload a Screen JSON file.";
-    $('dbg-workflow-container').innerHTML = `<div style="font-size: 13px; color: var(--text-muted); padding: 20px; text-align: center;">No Screen Workflow available.</div>`;
-    $('dbg-analysis-panel').innerHTML = `
-      <div class="api-details-empty">
-        <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-        </svg>
-        <h3>Screen Definition Not Found</h3>
-        <p>Please upload the Screen JSON file (e.g. <code>WO_COMPLETION.json</code>) associated with this log file to proceed with step-by-step debugging analysis.</p>
-      </div>`;
-    return;
-  }
+  return; // Screen Debugger removed
 
   // Parse details
   const name = screenDef.screenName || screenDef.name || "Unknown Screen";
@@ -3429,7 +3305,7 @@ async function loadLog(text, filename, isAlreadyLoading = false) {
     runScreenDebuggerAnalysis();
 
     // Auto-detect and refresh active screen in Code Reviewer
-    refreshCodeReviewerView();
+    
 
     const matchedScreenDef = getActiveScreenDefinition();
     if (matchedScreenDef && matchedScreenDef.fields) {
@@ -3607,7 +3483,7 @@ function handleFileSelect(file) {
 document.addEventListener('DOMContentLoaded', () => {
 
   initDashboardClicks();
-  initCodeReviewer();
+  
 
   // Nav buttons
   document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
@@ -3629,18 +3505,7 @@ document.addEventListener('DOMContentLoaded', () => {
     e.target.value = '';
   });
 
-  // Screen JSON upload
-  document.getElementById('upload-screen-btn').addEventListener('click', () => {
-    const screenInput = document.getElementById('screen-input');
-    screenInput.value = '';
-    screenInput.click();
-  });
-  document.getElementById('screen-input').addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    handleScreenSelect(file);
-    e.target.value = '';
-  });
+  
 
   // Paste
   document.getElementById('paste-submit').addEventListener('click', () => {
