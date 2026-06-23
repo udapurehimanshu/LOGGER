@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LogRadar:AI Log Investigator — Enterprise Edition</title>
+  <meta name="description"
+    content="Enterprise-grade AI log analysis platform. Universal root cause analysis, risk detection, and fix recommendations for any application, framework, or integration.">
+  <link rel="stylesheet" href="index.css?v=debugger_v2">
+</head>
+
+<body>
+
+  <!-- ══ Global Upload Progress Bar (top of page) ══ -->
+  <div id="upload-progress-bar" style="display:none;">
+    <div id="upload-progress-fill"></div>
+  </div>
+
+  <!-- ══ Sidebar Loading Overlay Card ══ -->
+  <div id="upload-loading-card" style="display:none;">
+    <div class="upload-loading-icon">
+      <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+      </svg>
+    </div>
+    <div class="upload-loading-title" id="upload-loading-title">Analysing Log File…</div>
+    <div class="upload-loading-filename" id="upload-loading-filename">—</div>
+
+    <!-- Card Inner Progress Bar -->
+    <div id="upload-card-progress" style="width: 100%; height: 6px; background: #1E293B; border-radius: 3px; overflow: hidden; margin: 4px 0;">
+      <div id="upload-card-progress-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #3B82F6, #06B6D4); transition: width 0.2s ease; border-radius: 3px;"></div>
+    </div>
+
+    <!-- Live line counter -->
+    <div id="upload-line-counter" style="display:none; font-size:11px; color:#94A3B8; font-family:'Fira Code',monospace; text-align:center; margin-top:-6px;">
+      <span id="upload-lines-done">0</span> / <span id="upload-lines-total">0</span> lines
+    </div>
+
+    <!-- Large-file warning badge -->
+    <div id="upload-large-warning" style="display:none; font-size:11px; color:#F59E0B; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:5px 10px; text-align:center; line-height:1.4;">
+      ⚠ Large file detected — processing in chunks<br>to keep the browser responsive
+    </div>
+
+    <div class="upload-loading-steps" id="upload-loading-steps">
+      <div class="upload-step" id="ustep-parse">
+        <span class="ustep-dot"></span><span class="ustep-label">Parsing log lines</span>
+      </div>
+      <div class="upload-step" id="ustep-classify">
+        <span class="ustep-dot"></span><span class="ustep-label">Classifying errors</span>
+      </div>
+      <div class="upload-step" id="ustep-api">
+        <span class="ustep-dot"></span><span class="ustep-label">Extracting API calls</span>
+      </div>
+      <div class="upload-step" id="ustep-sql">
+        <span class="ustep-dot"></span><span class="ustep-label">Detecting SQL issues</span>
+      </div>
+      <div class="upload-step" id="ustep-score">
+        <span class="ustep-dot"></span><span class="ustep-label">Scoring health</span>
+      </div>
+      <div class="upload-step" id="ustep-render">
+        <span class="ustep-dot"></span><span class="ustep-label">Rendering dashboard</span>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════════════════════════════════════
+     SIDEBAR
+════════════════════════════════════════════════════ -->
+  <aside class="sidebar">
+
+    <!-- Logo -->
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+          <polyline points="14 2 14 8 20 8" />
+          <path d="M16 13H8M16 17H8M10 9H8" />
+        </svg>
+      </div>
+      <div>
+        <span class="sidebar-logo-text">LogRadar:AI Log<br>Investigator</span>
+        <span class="sidebar-logo-sub">Enterprise · Universal</span>
+      </div>
+    </div>
+
+    <!-- Upload -->
+    <div class="sidebar-upload">
+      <button class="upload-btn-sidebar" id="upload-btn">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+        </svg>
+        Upload Log File
+      </button>
+      <input type="file" id="file-input" style="display:none" accept=".log,.txt,.json,.xml,.csv,.zip">
+      <div class="sidebar-file-name" id="sidebar-file-name">No file loaded</div>
+
+      <button class="upload-btn-sidebar" id="upload-screen-btn" style="margin-top: 10px; background: rgba(59, 130, 246, 0.06); border-color: rgba(59, 130, 246, 0.2); color: #60A5FA;">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+        Upload Screen JSON
+      </button>
+      <input type="file" id="screen-input" style="display:none" accept=".json">
+      <div class="sidebar-file-name" id="sidebar-screen-name">No Screen JSON loaded</div>
+    </div>
+
+    <!-- Paste -->
+    <div class="sidebar-paste">
+      <textarea class="paste-textarea" id="paste-area" placeholder="Paste log output here…"></textarea>
+      <button class="paste-submit-btn" id="paste-submit">Analyze Logs</button>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="sidebar-nav">
+      <div class="sidebar-nav-section">Analysis Views</div>
+
+      <button class="nav-item active" data-view="dashboard" id="nav-dashboard">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="7" height="7" />
+          <rect x="14" y="3" width="7" height="7" />
+          <rect x="14" y="14" width="7" height="7" />
+          <rect x="3" y="14" width="7" height="7" />
+        </svg>
+        Dashboard
+        <span class="nav-badge" id="nav-badge-errors" style="display:none">0</span>
+      </button>
+
+      <button class="nav-item" data-view="analyzer" id="nav-analyzer">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        Root Cause Analysis
+      </button>
+
+      <button class="nav-item" data-view="timeline" id="nav-timeline">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <line x1="12" y1="2" x2="12" y2="6" />
+          <line x1="12" y1="18" x2="12" y2="22" />
+          <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+          <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+          <line x1="2" y1="12" x2="6" y2="12" />
+          <line x1="18" y1="12" x2="22" y2="12" />
+          <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+          <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+        </svg>
+        Timeline
+      </button>
+
+      <button class="nav-item" data-view="flow" id="nav-flow">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+        Execution Flow
+      </button>
+
+      <button class="nav-item" data-view="api" id="nav-api">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+          <line x1="6" y1="6" x2="6.01" y2="6"/>
+          <line x1="6" y1="18" x2="6.01" y2="18"/>
+        </svg>
+        API Tracker
+      </button>
+
+      <button class="nav-item" data-view="codereview" id="nav-codereview">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <polyline points="16 18 22 12 16 6" />
+          <polyline points="8 6 2 12 8 18" />
+        </svg>
+        Code Reviewer
+      </button>
+
+      <button class="nav-item" data-view="debugger" id="nav-debugger">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+        Screen Debugger
+      </button>
+
+      <button class="nav-item" data-view="askai" id="nav-askai">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        Ask AI
+      </button>
+
+      <div class="sidebar-nav-section" style="margin-top:8px;">Sample Logs</div>
+
+      <button class="nav-item" onclick="loadSample('auth_403')">
+        <span class="sample-dot" style="background:#9333EA;"></span>
+        Auth Failure 403
+      </button>
+      <button class="nav-item" onclick="loadSample('api_timeout')">
+        <span class="sample-dot" style="background:#F59E0B;"></span>
+        API Timeout 404
+      </button>
+      <button class="nav-item" onclick="loadSample('db_constraint')">
+        <span class="sample-dot" style="background:#7C3AED;"></span>
+        DB Constraint Error
+      </button>
+      <button class="nav-item" onclick="loadSample('json_schema')">
+        <span class="sample-dot" style="background:#0891B2;"></span>
+        JSON Schema Mismatch
+      </button>
+      <button class="nav-item" onclick="loadSample('null_pointer')">
+        <span class="sample-dot" style="background:#DC2626;"></span>
+        Null Reference Crash
+      </button>
+      <button class="nav-item" onclick="loadSample('validation')">
+        <span class="sample-dot" style="background:#10B981;"></span>
+        Validation Failure
+      </button>
+      <button class="nav-item" onclick="loadSample('service_down')">
+        <span class="sample-dot" style="background:#E11D48;"></span>
+        Service Down 503
+      </button>
+      <button class="nav-item" onclick="loadSample('perf_slow')">
+        <span class="sample-dot" style="background:#2563EB;"></span>
+        Performance Degradation
+      </button>
+    </nav>
+
+  </aside>
+
+  <!-- ════════════════════════════════════════════════════
+     MAIN AREA
+════════════════════════════════════════════════════ -->
+  <div class="main">
+
+    <!-- Top Bar -->
+    <header class="topbar">
+      <span class="topbar-title" id="topbar-title">Root Cause Analysis</span>
+      <div class="topbar-file-info">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+          <polyline points="13 2 13 9 20 9" />
+        </svg>
+        <span id="topbar-filename">No file loaded — select a sample from the sidebar</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <!-- Privacy Mode Toggle -->
+        <button class="privacy-toggle" id="privacy-toggle" title="Toggle Privacy Mode — mask sensitive data">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          Privacy Mode
+        </button>
+        <div class="health-badge good" id="health-badge">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <polyline points="22 11.08 12 22 3 13 7.21 8.79 12 13.5 20.79 5 22 11.08" />
+          </svg>
+          <span id="health-badge-text">No Data</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Privacy Banner -->
+    <div id="privacy-banner" class="privacy-banner" style="display:none;">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      </svg>
+      🔒 Privacy Mode Active — Sensitive data is masked in all output panels
+    </div>
+
+    <!-- Views -->
+    <div class="views-area">
+
+      <!-- ═══════════ DASHBOARD VIEW ═══════════ -->
+      <div class="view active" id="view-dashboard">
+
+        <div class="view-title">Diagnostic Dashboard</div>
+        <div class="view-subtitle">Automated analysis — executive summary across any application, framework, or platform
+        </div>
+
+        <!-- Executive Summary Banner -->
+        <div id="exec-summary-banner" style="display:none; margin-bottom:18px;">
+          <div style="background:#1F2937; border-radius:10px; padding:18px 22px; color:#F9FAFB;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+              <svg width="18" height="18" fill="none" stroke="#60A5FA" stroke-width="2" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span
+                style="font-size:13px; font-weight:700; color:#93C5FD; text-transform:uppercase; letter-spacing:0.8px;">Executive
+                Summary</span>
+            </div>
+            <div id="exec-summary-body" style="font-size:13px; line-height:1.7; color:#D1D5DB;"></div>
+          </div>
+        </div>
+
+        <!-- Stat Cards Row -->
+        <div class="stat-grid">
+          <div class="stat-card" id="card-critical">
+            <div class="stat-card-icon" style="background:#FEF2F2;">
+              <svg width="18" height="18" fill="none" stroke="#DC2626" stroke-width="2" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            </div>
+            <div class="stat-card-label">Critical Errors</div>
+            <div class="stat-card-value" id="stat-critical">0</div>
+            <div class="stat-card-sub" id="stat-critical-sub"></div>
+            <div class="stat-card-bar" style="background:#DC2626;"></div>
+          </div>
+          <div class="stat-card" id="card-warnings">
+            <div class="stat-card-icon" style="background:#FFFBEB;">
+              <svg width="18" height="18" fill="none" stroke="#F59E0B" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            <div class="stat-card-label">Warnings</div>
+            <div class="stat-card-value" id="stat-warnings">0</div>
+            <div class="stat-card-sub" id="stat-warnings-sub"></div>
+            <div class="stat-card-bar" style="background:#F59E0B;"></div>
+          </div>
+          <div class="stat-card" id="card-slowapis">
+            <div class="stat-card-icon" style="background:#ECFEFF;">
+              <svg width="18" height="18" fill="none" stroke="#0891B2" stroke-width="2" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <path
+                  d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32" />
+              </svg>
+            </div>
+            <div class="stat-card-label">Slow APIs</div>
+            <div class="stat-card-value" id="stat-slowapis">0</div>
+            <div class="stat-card-sub">&gt;2000ms threshold</div>
+            <div class="stat-card-bar" style="background:#0891B2;"></div>
+          </div>
+          <div class="stat-card" id="card-sqlfail">
+            <div class="stat-card-icon" style="background:#F5F3FF;">
+              <svg width="18" height="18" fill="none" stroke="#7C3AED" stroke-width="2" viewBox="0 0 24 24">
+                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+              </svg>
+            </div>
+            <div class="stat-card-label">DB / SQL Errors</div>
+            <div class="stat-card-value" id="stat-sqlfail">0</div>
+            <div class="stat-card-sub" id="stat-sqlfail-sub"></div>
+            <div class="stat-card-bar" style="background:#7C3AED;"></div>
+          </div>
+          <div class="stat-card" id="card-users">
+            <div class="stat-card-icon" style="background:#F0FDF4;">
+              <svg width="18" height="18" fill="none" stroke="#16A34A" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </div>
+            <div class="stat-card-label">Affected Identities</div>
+            <div class="stat-card-value" id="stat-users">0</div>
+            <div class="stat-card-sub" id="stat-users-sub"></div>
+            <div class="stat-card-bar" style="background:#16A34A;"></div>
+          </div>
+          <div class="stat-card" id="card-total">
+            <div class="stat-card-icon" style="background:#EFF6FF;">
+              <svg width="18" height="18" fill="none" stroke="#3B82F6" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
+              </svg>
+            </div>
+            <div class="stat-card-label">Total Log Lines</div>
+            <div class="stat-card-value" id="stat-total">0</div>
+            <div class="stat-card-sub" id="stat-total-sub"></div>
+            <div class="stat-card-bar" style="background:#3B82F6;"></div>
+          </div>
+        </div>
+
+        <!-- Dashboard Grid Row 1 -->
+        <div class="dash-grid" style="margin-bottom:16px;">
+
+          <!-- Health Score -->
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              Log Health Score
+            </div>
+            <div class="health-score-card">
+              <div class="health-ring-container">
+                <svg width="90" height="90" viewBox="0 0 90 90">
+                  <circle cx="45" cy="45" r="38" fill="none" stroke="#F3F4F6" stroke-width="8" />
+                  <circle id="health-ring-fill" cx="45" cy="45" r="38" fill="none" stroke="#16A34A" stroke-width="8"
+                    stroke-dasharray="239" stroke-dashoffset="239" stroke-linecap="round"
+                    style="transition: stroke-dashoffset 1s ease, stroke 0.5s ease;" />
+                </svg>
+                <div class="health-ring-label">
+                  <span class="health-score-num" id="health-score-num">—</span>
+                  <span class="health-score-label">/ 100</span>
+                </div>
+              </div>
+              <div class="health-meta">
+                <div class="health-meta-row">
+                  <span>Error Rate</span>
+                  <span class="health-meta-val" id="hm-errrate" class="bad">—</span>
+                </div>
+                <div class="health-meta-row">
+                  <span>API Failures</span>
+                  <span class="health-meta-val" id="hm-apifail">—</span>
+                </div>
+                <div class="health-meta-row">
+                  <span>DB Errors</span>
+                  <span class="health-meta-val" id="hm-sqlerr">—</span>
+                </div>
+                <div class="health-meta-row">
+                  <span>Slowest API</span>
+                  <span class="health-meta-val" id="hm-slowapi">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Performance Analyzer -->
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                <polyline points="17 6 23 6 23 12" />
+              </svg>
+              API / Service Performance
+            </div>
+            <div id="perf-list">
+              <div class="no-data-state" style="padding:20px;">
+                <p>No API calls detected</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Dashboard Grid Row 2 -->
+        <div class="dash-grid" style="margin-bottom:16px;">
+
+          <!-- Error Grouping -->
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M4 6h16M4 12h16M4 18h7" />
+              </svg>
+              Error Grouping
+            </div>
+            <table class="group-table" id="error-group-table">
+              <thead>
+                <tr>
+                  <th>Exception / Error</th>
+                  <th>Count</th>
+                  <th>Type</th>
+                </tr>
+              </thead>
+              <tbody id="error-group-tbody">
+                <tr>
+                  <td colspan="3" style="text-align:center;padding:20px;color:#9CA3AF;">No errors grouped yet</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- DB Analyzer -->
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+              </svg>
+              Database / Query Analysis
+            </div>
+            <div id="sql-list">
+              <div class="no-data-state" style="padding:20px;">
+                <p>No database errors detected</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Module Map + Dependency Chain Row -->
+        <div class="dash-grid" style="margin-bottom:16px;">
+
+          <!-- Component Detection Card -->
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                <polyline points="2 17 12 22 22 17" />
+                <polyline points="2 12 12 17 22 12" />
+              </svg>
+              Affected Component
+            </div>
+            <div id="module-card-body">
+              <div class="no-data-state" style="padding:20px;">
+                <p>Upload a log to detect components</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dependency / Failure Chain -->
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
+              Failure Chain
+            </div>
+            <div id="dep-chain-body">
+              <div class="no-data-state" style="padding:20px;">
+                <p>No failure chain detected</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div><!-- /dashboard -->
+
+      <!-- ═══════════ ANALYZER VIEW ═══════════ -->
+      <div class="view" id="view-analyzer">
+
+        <!-- Toolbar -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+          <div class="search-wrap" style="max-width:320px;">
+            <input class="search-input" type="text" id="search-input"
+              placeholder="Search message, error code, service name…">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </div>
+          <button class="regex-toggle" id="regex-toggle">.*</button>
+          <div class="level-pills">
+            <label class="level-pill fatal"><input type="checkbox" class="level-checkbox" data-level="FATAL"
+                checked>FATAL</label>
+            <label class="level-pill error"><input type="checkbox" class="level-checkbox" data-level="ERROR"
+                checked>ERROR</label>
+            <label class="level-pill warn"><input type="checkbox" class="level-checkbox" data-level="WARN"
+                checked>WARN</label>
+            <label class="level-pill info"><input type="checkbox" class="level-checkbox" data-level="INFO"
+                checked>INFO</label>
+            <label class="level-pill debug"><input type="checkbox" class="level-checkbox" data-level="DEBUG"
+                checked>DEBUG</label>
+          </div>
+        </div>
+
+        <!-- Analyzer Inner (table + drawer) -->
+        <div class="analyzer-inner">
+
+          <!-- Log Table -->
+          <div class="logs-panel">
+            <div class="logs-table-wrap">
+              <table class="logs-table" id="logs-table">
+                <thead>
+                  <tr>
+                    <th style="width:80px;">Level</th>
+                    <th style="width:145px;">Timestamp</th>
+                    <th style="width:130px;">Source</th>
+                    <th>Message</th>
+                    <th style="width:36px;"></th>
+                  </tr>
+                </thead>
+                <tbody id="logs-tbody">
+                  <tr class="empty-row">
+                    <td colspan="5">Load a log file to start analysis</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Diagnostic Drawer / Root Cause Analysis Panel -->
+          <div class="diag-drawer" id="diag-drawer">
+            <div class="drawer-topbar">
+              <div class="drawer-topbar-left">
+                <span class="badge error" id="drawer-level-badge">ERROR</span>
+                <span id="drawer-heading" style="margin-left: 8px;">Root Cause Analysis</span>
+              </div>
+              <button class="close-drawer-btn" id="close-drawer" title="Close Panel">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="drawer-scroll" id="drawer-scroll">
+
+              <!-- 1. Summary Profile Card -->
+              <div class="rca-card rca-summary-profile">
+                <div class="rca-summary-header">
+                  <span class="rca-classification-badge" id="dc-errtype">ERROR TYPE</span>
+                  <div class="confidence-container">
+                    <span class="confidence-lbl">Confidence:</span>
+                    <span class="confidence-pct" id="dc-conf-pct">0%</span>
+                  </div>
+                </div>
+                <div class="confidence-bar-bg">
+                  <div class="confidence-bar-fill" id="dc-conf-bar" style="width: 0%; background: var(--error);"></div>
+                </div>
+                <div class="rca-rootcause-box">
+                  <div class="rca-section-title-sub">POSSIBLE ROOT CAUSE</div>
+                  <div class="diag-cause-text" id="dc-rootcause">Analyzing root cause...</div>
+                </div>
+              </div>
+
+              <!-- Code Execution Investigator Report Card -->
+              <div class="rca-card" id="ds-investigator-report" style="border-left: 3px solid #60A5FA; background: #0F172A; color: #E2E8F0; display: none; padding: 16px;">
+                <div class="rca-card-title" style="color: #60A5FA; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
+                  <span>🔍</span> Code Execution Investigator Report
+                </div>
+                <pre id="dc-investigator-report-text" style="font-family: 'Fira Code', monospace; font-size: 11px; line-height: 1.6; color: #E2E8F0; overflow-x: auto; white-space: pre-wrap; margin: 0; background: transparent; border: none; padding: 0; word-break: break-all;"></pre>
+              </div>
+
+              <!-- 2. Investigation Context Grid -->
+              <div class="rca-card">
+                <div class="rca-card-title">Investigation Context</div>
+                <div class="rca-grid">
+                  <div class="rca-grid-item">
+                    <div class="rca-grid-lbl">Layer</div>
+                    <div class="rca-grid-val" id="dc-module">—</div>
+                  </div>
+                  <div class="rca-grid-item">
+                    <div class="rca-grid-lbl">Screen / Endpoint</div>
+                    <div class="rca-grid-val" id="dc-screen">—</div>
+                  </div>
+                  <div class="rca-grid-item">
+                    <div class="rca-grid-lbl">Transaction</div>
+                    <div class="rca-grid-val" id="dc-transaction">—</div>
+                  </div>
+                  <div class="rca-grid-item">
+                    <div class="rca-grid-lbl">Identity</div>
+                    <div class="rca-grid-val" id="dc-user">—</div>
+                  </div>
+                  <div class="rca-grid-item" style="grid-column: span 2;">
+                    <div class="rca-grid-lbl">Timestamp</div>
+                    <div class="rca-grid-val" id="dc-timestamp">—</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. Script / Code Trace -->
+              <div class="rca-card" id="ds-code" style="display:none;">
+                <div class="rca-card-title">Script / Code Execution Trace</div>
+                <div style="font-size:11.5px; font-weight:600; color:#6B7280; margin-bottom:6px;">Script: <span
+                    id="dc-script-name">—</span> — Line <span id="dc-line-no">—</span></div>
+                <div class="code-trace" id="dc-code-trace">—</div>
+                <div style="margin-top:10px; font-size:12px; color:#DC2626; font-weight:500;" id="dc-code-explain">
+                </div>
+                <div class="diag-fix-block" id="dc-fix-block" style="margin-top:10px; display:none;">
+                  <div class="diag-fix-block-title">Suggested Code Patch</div>
+                  <code id="dc-fix-code"></code>
+                </div>
+              </div>
+
+              <!-- API / Service Details -->
+              <div class="rca-card" id="ds-api" style="display:none;">
+                <div class="rca-card-title">API / Service Investigation</div>
+                <div class="meta-row"><span class="meta-label">Service Name</span><span class="meta-val"
+                    id="da-name">—</span></div>
+                <div class="meta-row"><span class="meta-label">Endpoint</span><span class="meta-val"
+                    id="da-endpoint">—</span></div>
+                <div class="meta-row"><span class="meta-label">HTTP Status</span><span class="meta-val"
+                    id="da-status">—</span></div>
+                <div class="meta-row"><span class="meta-label">Response Time</span><span class="meta-val"
+                    id="da-time">—</span></div>
+                <div style="margin-top:10px;">
+                  <div class="rca-section-title-sub">Status Analysis</div>
+                  <div id="da-http-explain" style="font-size:12px; color:#374151; line-height:1.5;"></div>
+                </div>
+                <div style="margin-top:10px;" id="da-req-block">
+                  <details>
+                    <summary class="rca-details-summary">Request Payload</summary>
+                    <div class="code-trace" id="da-request" style="max-height:120px; margin-top:5px;">—</div>
+                  </details>
+                </div>
+                <div style="margin-top:10px;" id="da-resp-block">
+                  <details open>
+                    <summary class="rca-details-summary">Response Body</summary>
+                    <div class="code-trace" id="da-response" style="max-height:120px; margin-top:5px;">—</div>
+                    <div style="margin-top:8px; font-size:12px; color:#374151;" id="da-resp-explain"></div>
+                  </details>
+                </div>
+              </div>
+
+              <!-- DB / SQL Analysis Details -->
+              <div class="rca-card" id="ds-sql" style="display:none;">
+                <div class="rca-card-title">Database / Query Diagnosis</div>
+                <div class="meta-row"><span class="meta-label">DB Error</span><span class="meta-val"
+                    id="dsql-ora">—</span></div>
+                <div style="margin-top:8px; font-size:12.5px; color:#374151; line-height:1.5;" id="dsql-meaning"></div>
+                <div style="margin-top:10px;" id="dsql-query-block">
+                  <div class="rca-section-title-sub">SQL Query</div>
+                  <div class="code-trace" id="dsql-query" style="white-space: pre-wrap;">—</div>
+                </div>
+                <div style="margin-top:10px;" id="dsql-params-block">
+                  <div class="rca-section-title-sub">Bound Parameters</div>
+                  <div id="dsql-params" style="font-size:12px; line-height:1.7;"></div>
+                </div>
+              </div>
+
+              <!-- Printer Details (legacy — hidden by default) -->
+              <div class="rca-card" id="ds-printer" style="display:none;">
+                <div class="rca-card-title">Output Device Diagnostics</div>
+                <div class="meta-row"><span class="meta-label">Device Name</span><span class="meta-val"
+                    id="dprint-name">—</span></div>
+                <div class="meta-row"><span class="meta-label">Device Address</span><span class="meta-val"
+                    id="dprint-ip">—</span></div>
+                <div class="meta-row"><span class="meta-label">Template</span><span class="meta-val"
+                    id="dprint-template">—</span></div>
+                <div class="meta-row"><span class="meta-label">Status check</span><span class="meta-val"
+                    id="dprint-status" style="color:var(--error); font-weight:700;">OFFLINE</span></div>
+                <div style="margin-top:10px;">
+                  <div class="rca-section-title-sub">Connection Error</div>
+                  <div class="code-trace" id="dprint-error" style="color:#F87171;">—</div>
+                </div>
+              </div>
+
+              <!-- Validation Details -->
+              <div class="rca-card" id="ds-validation" style="display:none;">
+                <div class="rca-card-title">Business Validation Failures</div>
+                <div style="font-size:12.5px; color:#374151; line-height:1.6;" id="dval-list"></div>
+              </div>
+
+              <!-- Variable Tracker -->
+              <div class="rca-card" id="ds-variables">
+                <div class="rca-card-title">Variable &amp; State Tracking</div>
+                <div id="var-track-list">—</div>
+              </div>
+
+              <!-- 4. Fix Recommendations Support Guide -->
+              <div class="rca-card rca-actions-card">
+                <div class="rca-card-title">Fix Recommendations</div>
+                <div id="dc-fix-body"></div>
+              </div>
+
+              <!-- Impact Analysis -->
+              <div class="rca-card" id="ds-impact">
+                <div class="rca-card-title">Impact Scope</div>
+                <div id="dc-impact-body">—</div>
+              </div>
+
+              <!-- 5. Advanced Diagnosis (Accordions) -->
+              <div class="rca-advanced">
+                <details class="rca-accordion">
+                  <summary class="rca-accordion-summary">Preceding Log Context</summary>
+                  <div class="rca-accordion-content">
+                    <div style="font-size:11px; color:#9CA3AF; margin-bottom:6px;">Lines immediately before the
+                      exception:</div>
+                    <div class="context-block" id="dc-context">—</div>
+                  </div>
+                </details>
+
+                <details class="rca-accordion">
+                  <summary class="rca-accordion-summary">Raw Exception Stack Trace</summary>
+                  <div class="rca-accordion-content">
+                    <div class="code-trace" id="dc-rawtrace">—</div>
+                  </div>
+                </details>
+
+                <details class="rca-accordion" id="ds-similar">
+                  <summary class="rca-accordion-summary">Similar Historic Incidents</summary>
+                  <div class="rca-accordion-content" id="dc-similar-body">
+                    —
+                  </div>
+                </details>
+              </div>
+
+            </div><!-- /drawer-scroll -->
+          </div><!-- /diag-drawer -->
+
+        </div><!-- /analyzer-inner -->
+      </div><!-- /analyzer -->
+
+      <!-- ═══════════ TIMELINE VIEW ═══════════ -->
+      <div class="view" id="view-timeline">
+        <div class="view-title">Event Timeline</div>
+        <div class="view-subtitle">Chronological reconstruction of all logged events to trace execution flow</div>
+        <div id="timeline-list">
+          <div class="no-data-state">
+            <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+            </svg>
+            <h3>No timeline data</h3>
+            <p>Upload or paste a log file to see the event timeline.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ EXECUTION FLOW VIEW ═══════════ -->
+      <div class="view" id="view-flow">
+        <div class="view-title">Execution Flow</div>
+        <div class="view-subtitle">Reconstructed business process flow — showing exactly where the transaction broke
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              Transaction Flow Reconstruction
+            </div>
+            <div id="wms-flow-container">
+              <div class="no-data-state" style="padding:20px;">
+                <p>No transaction flow detected</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              Transaction Summary
+            </div>
+            <div id="flow-summary-body">
+              <div class="no-data-state" style="padding:20px;">
+                <p>No summary available</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ API SERVICES TRACKER VIEW ═══════════ -->
+      <div class="view" id="view-api">
+        <div class="view-title">API Services Tracker</div>
+        <div class="view-subtitle">Detailed audit log of web service calls, payloads, response codes, and latency detected in the logs</div>
+
+        <div class="api-tracker-layout">
+          <!-- API List Panel -->
+          <div class="api-list-panel">
+            <div class="api-list-header">
+              <div class="search-wrap">
+                <input class="search-input" type="text" id="api-search-input" placeholder="Filter by API name or status...">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </div>
+            </div>
+            <div class="api-list" id="api-list-container">
+              <div class="no-data-state">
+                <p>No API calls loaded</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- API Details Panel -->
+          <div class="api-details-panel" id="api-details-panel">
+            <div class="api-details-empty">
+              <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              <h3>No API Selected</h3>
+              <p>Select an API call from the list to view its details, request headers, and response payload.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ CODE REVIEWER VIEW ═══════════ -->
+      <div class="view" id="view-codereview">
+        <div class="view-title">Code Reviewer & Risk Detector</div>
+        <div class="view-subtitle">Review event scripts and configurations for the active screen. Analyze vulnerabilities, null safety risks, and view suggested fixes.</div>
+
+        <div class="api-tracker-layout">
+          <!-- Left Panel: Screen and Fields -->
+          <div class="api-list-panel">
+            <div class="api-list-header" style="display:flex; flex-direction:column; gap:10px; padding:15px; border-bottom:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:11px; font-weight:700; color:#6B7280; letter-spacing: 0.5px;">ACTIVE LOG SCREEN</div>
+              <div id="code-screen-info" style="font-size:14px; font-weight:700; color:#F8FAFC; padding:4px 0;">TASK_SCREEN_11 (Stock Adjustment)</div>
+              <div id="code-screen-meta-desc" style="font-size:11px; color:#94A3B8;">Module: Inventory</div>
+            </div>
+            <div class="api-list" id="code-fields-container" style="padding:10px 0;">
+              <!-- Dynamic Field & Event tree will be injected here -->
+            </div>
+          </div>
+
+          <!-- Right Panel: Code Editor and Review Summary -->
+          <div class="api-details-panel" id="code-details-panel" style="display:flex; flex-direction:column; overflow:hidden;">
+            <!-- Tab Headers -->
+            <div class="code-details-tabs" style="display:flex; border-bottom:1px solid var(--border); padding: 0 16px; background:#F8FAFC; border-radius:12px 12px 0 0; gap: 20px; flex-shrink:0;">
+              <button class="code-tab-btn active" data-tab="flow" style="padding:14px 4px; border:none; background:none; font-family:inherit; font-size:13px; font-weight:600; color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer;">🔍 Screen Flow & Inventory</button>
+              <button class="code-tab-btn" data-tab="review" style="padding:14px 4px; border:none; background:none; font-family:inherit; font-size:13px; font-weight:600; color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer;">💻 Event Code Review</button>
+              <button class="code-tab-btn" data-tab="maps" style="padding:14px 4px; border:none; background:none; font-family:inherit; font-size:13px; font-weight:600; color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer;">📦 API & Object Maps</button>
+              <button class="code-tab-btn" data-tab="page" style="padding:14px 4px; border:none; background:none; font-family:inherit; font-size:13px; font-weight:600; color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer;">📄 Page Events</button>
+            </div>
+
+            <!-- Tab Contents -->
+            <div class="code-tab-content active" id="tab-content-flow" style="padding:24px; flex-grow:1; overflow-y:auto;">
+              <div class="api-details-empty">
+                <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                  <polyline points="16 18 22 12 16 6" />
+                  <polyline points="8 6 2 12 8 18" />
+                </svg>
+                <h3>No Screen Loaded</h3>
+                <p>Upload a log file or select a screen in the left dropdown to reconstruct the screen metadata, flow, and field inventories.</p>
+              </div>
+            </div>
+
+            <div class="code-tab-content" id="tab-content-review" style="padding:24px; flex-grow:1; overflow-y:auto;">
+              <div class="api-details-empty">
+                <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                  <polyline points="16 18 22 12 16 6" />
+                </svg>
+                <h3>No Event Script Selected</h3>
+                <p>Select a field event handler from the left sidebar tree to run the Code Reviewer and display refactoring options.</p>
+              </div>
+            </div>
+
+            <div class="code-tab-content" id="tab-content-maps" style="padding:24px; flex-grow:1; overflow-y:auto;">
+              <div class="api-details-empty">
+                <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+                </svg>
+                <h3>No Screen Loaded</h3>
+                <p>API and object session mappings will populate once a screen is active.</p>
+              </div>
+            </div>
+
+            <div class="code-tab-content" id="tab-content-page" style="padding:24px; flex-grow:1; overflow-y:auto;">
+              <div class="api-details-empty">
+                <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                <h3>No Page Events Loaded</h3>
+                <p>Page-level event handlers (OnPageEntered, Input Processor, etc.) will populate once a screen is active.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ SCREEN DEBUGGER VIEW ═══════════ -->
+      <div class="view" id="view-debugger">
+        <div class="view-title">Screen Debugger AI</div>
+        <div class="view-subtitle">Correlate screen JSON structures and runtime production logs to inspect logger coverage, missing user feedback, and trace dynamic variable bounds.</div>
+
+        <div class="api-tracker-layout">
+          <!-- Left Panel: Screen Definition Map & Workflow -->
+          <div class="api-list-panel" style="padding: 16px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto;">
+            <div class="card" style="margin: 0; padding: 16px; background: #0F172A; border-color: rgba(255,255,255,0.06);">
+              <div style="font-size: 11px; font-weight: 700; color: #60A5FA; letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 8px;">Active Screen Meta</div>
+              <div style="font-size: 15px; font-weight: 700; color: #F8FAFC;" id="dbg-screen-title">No Screen Loaded</div>
+              <div style="font-size: 12px; color: #94A3B8; margin-top: 4px;" id="dbg-screen-meta">—</div>
+            </div>
+
+            <div class="card" style="margin: 0; padding: 16px; flex-grow: 1; display: flex; flex-direction: column; gap: 12px;">
+              <div class="card-title" style="margin-bottom: 4px;">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                Screen Workflow Progression
+              </div>
+              <div id="dbg-workflow-container" style="display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); overflow-y: auto; max-height: 380px;">
+                <div style="font-size: 13px; color: var(--text-muted); padding: 20px; text-align: center;">Upload a Screen JSON file or load a sample log to render the visual workflow map.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Panel: Debugger Copilot Analysis -->
+          <div class="api-details-panel" id="dbg-analysis-panel" style="display: flex; flex-direction: column; overflow-y: auto; padding: 24px; gap: 20px;">
+            <div class="api-details-empty">
+              <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              </svg>
+              <h3>No Screen Definition or Log Active</h3>
+              <p>Upload a Screen JSON file (e.g. <code>WO_COMPLETION.json</code>) and a Log file, or load one of the generic samples from the sidebar to automatically run the Screen Debugger AI.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ ASK AI VIEW ═══════════ -->
+      <div class="view" id="view-askai">
+        <div class="view-title">Ask Log AI</div>
+        <div class="view-subtitle">Query your logs in plain English — responds as an expert L3 support engineer</div>
+
+        <div class="ask-ai-layout">
+
+          <!-- Chat Panel -->
+          <div class="ai-chat-area">
+            <div class="chat-messages" id="chat-messages">
+              <div class="chat-msg ai">
+                👋 Hello! I'm your <strong>LogRadar:AI Log Investigator</strong>.<br><br>
+                Upload any log file and ask me anything — errors, API failures, database issues, root causes, or fixes.
+                I work across any framework, language, or platform.<br><br>
+                Try: <em>"Why did the request fail?"</em> or <em>"What are the slow APIs?"</em>
+              </div>
+            </div>
+            <div class="chat-input-row">
+              <input class="chat-input" type="text" id="chat-input"
+                placeholder="Ask about your log… (press Enter to send)">
+              <button class="chat-send-btn" id="chat-send">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <line x1="22" y1="2" x2="11" y2="13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+                Send
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Questions -->
+          <div>
+            <div class="card">
+              <div class="card-title">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                Quick Questions
+              </div>
+              <button class="quick-q-btn" onclick="askQuestion('Why did the request fail?')">❓ Why did the request
+                fail?</button>
+              <button class="quick-q-btn" onclick="askQuestion('What are the slow APIs?')">⏱ What are the slow
+                APIs?</button>
+              <button class="quick-q-btn" onclick="askQuestion('Explain the database error')">🗃️ Explain the database
+                error</button>
+              <button class="quick-q-btn" onclick="askQuestion('What is the root cause?')">🎯 What is the root
+                cause?</button>
+              <button class="quick-q-btn" onclick="askQuestion('Who is the affected user?')">👤 Who is the affected
+                user?</button>
+              <button class="quick-q-btn" onclick="askQuestion('What is the fix?')">🔧 What is the fix?</button>
+              <button class="quick-q-btn" onclick="askQuestion('Show me the executive summary')">📋 Executive
+                Summary</button>
+              <button class="quick-q-btn" onclick="askQuestion('Which component failed?')">📦 Which component
+                failed?</button>
+              <button class="quick-q-btn" onclick="askQuestion('What HTTP errors are there?')">🌐 HTTP Errors</button>
+              <button class="quick-q-btn" onclick="askQuestion('Are there any security risks?')">🔐 Security
+                Risks</button>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /askai -->
+
+    </div><!-- /views-area -->
+  </div><!-- /main -->
+
+  <!-- Drag-drop overlay (invisible, global) -->
+  <div id="drop-overlay"
+    style="display:none; position:fixed; inset:0; background:rgba(59,130,246,0.08); border:3px dashed #3B82F6; border-radius:12px; z-index:9999; align-items:center; justify-content:center; font-size:22px; font-weight:700; color:#3B82F6; pointer-events:none; flex-direction:column; gap:8px;">
+    <svg width="48" height="48" fill="none" stroke="#3B82F6" stroke-width="1.5" viewBox="0 0 24 24">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+    </svg>
+    Drop log file here
+  </div>
+
+  <script src="sample_logs.js?v=debugger_v2"></script>
+  <script src="app.js?v=debugger_v2"></script>
+</body>
+
+</html>
