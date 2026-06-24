@@ -2772,6 +2772,17 @@ function showScreenLoadingUI(filename) {
   if (fname) fname.textContent = filename || 'Screen JSON';
 }
 
+
+function deepFindKey(obj, keyToFind) {
+  if (typeof obj !== 'object' || obj === null) return null;
+  if (obj[keyToFind]) return obj[keyToFind];
+  for (let key in obj) {
+    const res = deepFindKey(obj[key], keyToFind);
+    if (res) return res;
+  }
+  return null;
+}
+
 function handleScreenSelect(file) {
   showScreenLoadingUI(file.name);
   const reader = new FileReader();
@@ -2789,9 +2800,20 @@ function handleScreenSelect(file) {
       let data;
       try {
         data = JSON.parse(ev.target.result);
-        if (!data.screenName && !data.title && !data.fields) {
+        const deepFields = deepFindKey(data, 'fields');
+        const deepWS = deepFindKey(data, 'webservices');
+        
+        if (!data.screenName && !data.title && !deepFields) {
            data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
+        } else {
+           if (!data.fields && deepFields) data.fields = deepFields;
+           if (!data.webservices && deepWS) data.webservices = deepWS;
+           if (!data.screenName) data.screenName = file.name;
         }
+      } catch (err) {
+        // Not a JSON file, treat as raw code
+        data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
+      }
       } catch (err) {
         // Not a JSON file, treat as raw code
         data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
