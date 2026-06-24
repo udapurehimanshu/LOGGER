@@ -2934,299 +2934,298 @@ function runScreenDebuggerAnalysis() {
 
   const activeParsed = STATE.filterByScreen ? STATE.parsed.filter(r => isLogRelatedToScreen(r.message)) : STATE.parsed;
   const logText = activeParsed.map(e => e.message).join('\n');
+  const lowerLogText = logText.toLowerCase();
 
-  const isSimulated = false;
+  const screenDef = STATE.screenDefinition;
   if (!screenDef) return;
 
-  // Parse details
-  const name = screenDef.screenName || screenDef.name || "Unknown Screen";
+  const name = screenDef.screenName || screenDef.title || "Unknown Screen";
   const title = screenDef.title || name;
   const module = screenDef.module || "General";
-  const flow = screenDef.flow || [];
   
+  // Build Flow
+  let flow = screenDef.flow || [];
+  if (flow.length === 0 && screenDef.fields) {
+     flow = Object.keys(screenDef.fields);
+  }
+
   $('dbg-screen-title').textContent = title;
-  $('dbg-screen-meta').textContent = `Screen: ${name} | Module: ${module} | Fields: ${flow.length}${isSimulated ? ' (Simulated from Log context)' : ''}`;
-
-  // Find failing components
-  let failingField = null;
-  let failingEvent = null;
-  let failingApi = null;
-  let failingObject = null;
-
-  // Search logic for failures
-  if (logText.includes("NullPointerException") || logText.includes("TargetError")) {
-    failingField = flow.find(f => logText.includes(f));
-    failingEvent = "OnExit";
-  }
-  if (logText.includes("JSONException") || logText.includes("Response Code")) {
-    failingApi = (STATE.analysis.apis && STATE.analysis.apis.length) ? STATE.analysis.apis[0].name : "REST_API";
-    const inventoryItem = screenDef.inventory ? screenDef.inventory.find(i => i.webservice === failingApi) : null;
-    if (inventoryItem) {
-      failingField = inventoryItem.field;
-      failingEvent = "OnExit";
-    }
-  }
-  if (logText.includes("ORA-")) {
-    failingField = flow.find(f => logText.includes(f));
-  }
+  
+  // Extract extra components if available
+  const btnCount = screenDef.buttons ? Object.keys(screenDef.buttons).length : 0;
+  const lovCount = screenDef.lovs ? Object.keys(screenDef.lovs).length : 0;
+  
+  $('dbg-screen-meta').textContent = `Screen: ${name} | Module: ${module} | Fields: ${flow.length} | Buttons: ${btnCount} | LOVs: ${lovCount}`;
 
   // Draw Workflow Diagram
   let workflowHtml = "";
   flow.forEach((step, idx) => {
-    const isActive = step === failingField;
     workflowHtml += `
-      <div class="dbg-flow-item ${isActive ? 'active' : ''}">
-        <div style="font-weight: 700; font-size: 13px; color: ${isActive ? 'var(--error)' : 'var(--text-dark)'};">${escHtml(step)}</div>
-        <div style="font-size: 10px; color: var(--text-light); text-transform: uppercase;">${isActive ? '🔴 CRITICAL FAILURE' : 'Component'}</div>
+      <div class="dbg-flow-item active" style="border-color: rgba(56, 189, 248, 0.4);">
+        <div style="font-weight: 700; font-size: 13px; color: var(--text-dark);">${escHtml(step)}</div>
       </div>
     `;
     if (idx < flow.length - 1) {
       workflowHtml += `<div class="dbg-flow-arrow">↓</div>`;
     }
   });
-  $('dbg-workflow-container').innerHTML = workflowHtml;
+  $('dbg-workflow-container').innerHTML = workflowHtml || `<div style="font-size:12px; color:var(--text-muted);">No structured workflow detected.</div>`;
 
-  // Let's analyze Loggers & Status Messages coverage
-  const coverageItems = [];
-  const suggestionsLoggers = [];
-  const suggestionsStatus = [];
-  const apiDebuggingList = [];
+  let analysisHtml = '';
 
-  flow.forEach(field => {
-    const fieldEvents = screenDef.fields ? screenDef.fields[field] : null;
-    let hasLogger = false;
-    let hasStatusMessage = false;
-    let eventName = "OnExit";
-    let eventCode = "";
+  // 1. RAW CODE DISPLAY (Fallback)
+  if (screenDef.rawCode) {
+    analysisHtml += `
+      <div class="dbg-copilot-section">
+        <div class="dbg-copilot-title" style="color:#38BDF8;">
+          <span>💻</span> UPLOADED CODE (RAW)
+        </div>
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+          Raw code from ${STATE.currentScreenFile || 'the uploaded file'}.
+        </div>
+        <pre style="background:#0F172A; color:#E2E8F0; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto; margin:4px 0 0 0; border:1px solid rgba(255,255,255,0.06);">${escHtml(screenDef.rawCode)}</pre>
+      </div>
+    `;
+  }
 
-    if (fieldEvents) {
-      const keys = Object.keys(fieldEvents);
-      if (keys.length) {
-        eventName = keys[0];
-        eventCode = fieldEvents[eventName].code || "";
-        if (/logger\.(trace|debug|info|error)/i.test(eventCode)) {
-          hasLogger = true;
+  // 2. HEALTH SCORE & INVESTIGATION PATH
+  if (screenDef.fields) {
+     let fieldsWithLogic = 0;
+     let fieldsWithLogger = 0;
+     let fieldsWithStatus = 0;
+     let fieldsWithValidation = 0;
+     let totalFields = Object.keys(screenDef.fields).length;
+
+     for (const events of Object.values(screenDef.fields)) {
+        let hasLogic = false, hasLogger = false, hasStatus = false, hasValidation = false;
+        for (const ev of Object.values(events)) {
+           if (ev && ev.code) {
+              hasLogic = true;
+              if (/logger\./i.test(ev.code)) hasLogger = true;
+              if (/setStatusMessage/i.test(ev.code)) hasStatus = true;
+              if (/(throw new|catch\s*\(|if\s*\([^{]*null|validation)/i.test(ev.code)) hasValidation = true;
+           }
         }
-        if (/setStatusMessage/i.test(eventCode)) {
-          hasStatusMessage = true;
+        if (hasLogic) fieldsWithLogic++;
+        if (hasLogger) fieldsWithLogger++;
+        if (hasStatus) fieldsWithStatus++;
+        if (hasValidation) fieldsWithValidation++;
+     }
+
+     const pct = (num) => totalFields > 0 ? Math.round((num / totalFields) * 100) : 0;
+
+     analysisHtml += `
+      <div style="display:flex; gap:16px; margin-bottom:16px;">
+        <!-- Health Score -->
+        <div class="dbg-copilot-section" style="flex:1; margin-bottom:0;">
+          <div class="dbg-copilot-title" style="color:#10B981; font-size:14px; margin-bottom:12px;">
+            <span>🩺</span> SCREEN HEALTH SCORE
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-normal);">
+              <span>Field Coverage:</span> <strong>${pct(fieldsWithLogic)}%</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-normal);">
+              <span>Logger Coverage:</span> <strong style="color:${pct(fieldsWithLogger) < 50 ? '#EF4444' : '#10B981'}">${pct(fieldsWithLogger)}%</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-normal);">
+              <span>Status Message Coverage:</span> <strong style="color:${pct(fieldsWithStatus) < 50 ? '#EF4444' : '#10B981'}">${pct(fieldsWithStatus)}%</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-normal);">
+              <span>Validation Coverage:</span> <strong>${pct(fieldsWithValidation)}%</strong>
+            </div>
+          </div>
+          ${pct(fieldsWithLogger) < 50 ? '<div style="margin-top:12px; font-size:11px; color:#F59E0B; background:rgba(245, 158, 11, 0.1); padding:8px; border-radius:4px;">⚠️ This screen is difficult to debug because it lacks loggers and status messages.</div>' : ''}
+        </div>
+
+        <!-- Investigation Path -->
+        <div class="dbg-copilot-section" style="flex:2; margin-bottom:0; border-left: 4px solid var(--primary);">
+          <div class="dbg-copilot-title" style="color:var(--primary); font-size:14px; margin-bottom:12px;">
+            <span>🛤️</span> DEVELOPER INVESTIGATION PATH
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-family:monospace;">
+            <span style="background:rgba(59,130,246,0.1); color:#60A5FA; padding:4px 8px; border-radius:4px;">Verify Field</span>
+            <span style="color:#64748B;">↓</span>
+            <span style="background:rgba(59,130,246,0.1); color:#60A5FA; padding:4px 8px; border-radius:4px;">Verify Object</span>
+            <span style="color:#64748B;">↓</span>
+            <span style="background:rgba(59,130,246,0.1); color:#60A5FA; padding:4px 8px; border-radius:4px;">Verify Session Value</span>
+            <span style="color:#64748B;">↓</span>
+            <span style="background:rgba(59,130,246,0.1); color:#60A5FA; padding:4px 8px; border-radius:4px;">Verify API Request</span>
+            <span style="color:#64748B;">↓</span>
+            <span style="background:rgba(59,130,246,0.1); color:#60A5FA; padding:4px 8px; border-radius:4px;">Verify API Response</span>
+            <span style="color:#64748B;">↓</span>
+            <span style="background:rgba(59,130,246,0.1); color:#60A5FA; padding:4px 8px; border-radius:4px;">Verify Validation</span>
+            <span style="color:#64748B;">↓</span>
+            <span style="background:rgba(16,185,129,0.1); color:#34D399; padding:4px 8px; border-radius:4px;">Identify Root Cause</span>
+          </div>
+        </div>
+      </div>
+     `;
+  }
+
+  // 3. DETAILED FIELD AND WEBSERVICE CORRELATION
+  if (screenDef.fields) {
+    const severities = {
+      CRITICAL: { color: '#EF4444', badge: '🔴 Critical', triggers: ['nullpointer', 'targeterror', 'evalerror', 'fatal'] },
+      HIGH: { color: '#F97316', badge: '🟠 High', triggers: ['http 5', 'http 4'] },
+      MEDIUM: { color: '#EAB308', badge: '🟡 Medium', triggers: ['json', 'validation', 'exception', 'ora-'] }
+    };
+    
+    let screenCodeHtml = '<div style="display:flex; flex-direction:column; gap:16px;">';
+    for (const [fieldName, events] of Object.entries(screenDef.fields)) {
+      let severity = null;
+      let errorReason = "";
+      let failedEvent = "Unknown";
+      
+      const checkSeverity = (text, contextDesc, evName) => {
+         for (const [level, rules] of Object.entries(severities)) {
+            for (const t of rules.triggers) {
+               if (text.includes(t)) {
+                  if (!severity || level === 'CRITICAL' || (level === 'HIGH' && severity.badge === '🟡 Medium')) {
+                     severity = rules;
+                     errorReason = `${t.toUpperCase()} detected near ${contextDesc}.`;
+                     failedEvent = evName || "Execution Flow";
+                  }
+               }
+            }
+         }
+      };
+
+      // Check field match in logs
+      const fieldRegex = new RegExp(fieldName, 'i');
+      if (fieldRegex.test(logText)) {
+         checkSeverity(lowerLogText, `field ${fieldName}`, null);
+      }
+
+      let eventsHtml = '';
+      let associatedWS = null;
+
+      for (const [evName, ev] of Object.entries(events)) {
+         if (ev.code) {
+           eventsHtml += `
+             <div style="margin-top:12px;">
+               <strong style="color:#818CF8; font-size:12px;">${escHtml(evName)} Logic:</strong>
+               <pre style="background:#0F172A; color:#E2E8F0; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto; margin:4px 0 0 0; border:1px solid rgba(255,255,255,0.06);">${escHtml(ev.code)}</pre>
+             </div>
+           `;
+           
+           if (screenDef.webservices) {
+             for (const wsName of Object.keys(screenDef.webservices)) {
+               if (ev.code.includes(wsName)) {
+                 associatedWS = { name: wsName, data: screenDef.webservices[wsName], event: evName };
+               }
+             }
+           }
+         }
+      }
+
+      let wsHtml = '';
+      if (associatedWS) {
+        const ws = associatedWS.data;
+        wsHtml += `
+          <div style="margin-top:12px; background:rgba(0,0,0,0.2); padding:10px; border-radius:6px; border:1px solid rgba(245, 158, 11, 0.2);">
+            <div style="font-size:12px; font-weight:bold; color:#F59E0B; margin-bottom:8px;">🔗 Webservice Mapping: ${escHtml(associatedWS.name)}</div>
+            <div style="font-size:11px; color:#D1D5DB; margin-bottom:4px;"><strong>Calling Event:</strong> ${escHtml(associatedWS.event)}</div>
+            <div style="font-size:11px; color:#D1D5DB; margin-bottom:4px;"><strong>URL:</strong> ${escHtml(ws.request || ws.url || 'N/A')}</div>
+        `;
+        if (ws.requestMap || ws.body) {
+           wsHtml += `<div style="font-size:11px; color:#D1D5DB; margin-bottom:4px;"><strong>Request Structure (if available):</strong> <pre style="display:inline; background:#111827; padding:2px 4px; border-radius:4px;">${escHtml(JSON.stringify(ws.requestMap || ws.body))}</pre></div>`;
+        }
+        if (ws.responseMap || ws.response) {
+           wsHtml += `<div style="font-size:11px; color:#D1D5DB; margin-bottom:4px;"><strong>Response Structure (if available):</strong> <pre style="display:inline; background:#111827; padding:2px 4px; border-radius:4px;">${escHtml(JSON.stringify(ws.responseMap || ws.response))}</pre></div>`;
+        }
+        if (ws.columnMap) {
+           wsHtml += `<div style="font-size:11px; color:#D1D5DB; margin-bottom:4px;"><strong>Column Mapping (if available):</strong> <pre style="display:inline; background:#111827; padding:2px 4px; border-radius:4px;">${escHtml(JSON.stringify(ws.columnMap))}</pre></div>`;
+        }
+        wsHtml += `</div>`;
+        
+        if (new RegExp(associatedWS.name, 'i').test(logText)) {
+           checkSeverity(lowerLogText, `API ${associatedWS.name}`, associatedWS.event);
         }
       }
+
+      // Default severity if none
+      if (!severity && (eventsHtml || wsHtml)) severity = { color: '#10B981', badge: '🟢 Informational' };
+      if (!severity) severity = { color: '#64748B', badge: '➖ None' };
+
+      if (eventsHtml || wsHtml) {
+         let debuggerAssitantHtml = '';
+         if (severity.badge !== '🟢 Informational' && severity.badge !== '➖ None') {
+            debuggerAssitantHtml = `
+              <div style="margin-top:16px; padding:16px; background:rgba(0,0,0,0.3); border-radius:8px; border-left:4px solid ${severity.color};">
+                <h4 style="margin:0 0 12px 0; color:${severity.color}; font-size:14px; text-transform:uppercase;">🛠️ Debugging Assistant</h4>
+                
+                <div style="display:flex; gap:16px;">
+                  <div style="flex:1;">
+                    <div style="font-size:11px; color:#94A3B8; text-transform:uppercase; margin-bottom:4px;">What Failed</div>
+                    <div style="font-size:12px; color:var(--text-normal);">
+                      <strong>Field:</strong> ${escHtml(fieldName)}<br>
+                      <strong>Event:</strong> ${escHtml(failedEvent)}<br>
+                      <strong style="color:${severity.color};">Failure:</strong> ${escHtml(errorReason)}
+                    </div>
+                  </div>
+                  
+                  <div style="flex:1;">
+                    <div style="font-size:11px; color:#94A3B8; text-transform:uppercase; margin-bottom:4px;">What To Verify</div>
+                    <ul style="font-size:12px; color:var(--text-normal); margin:0; padding-left:16px;">
+                      <li>Field Value</li>
+                      <li>Object Value</li>
+                      <li>Session Object</li>
+                      <li>API Response</li>
+                      <li>Response Code</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div style="margin-top:16px;">
+                  <div style="font-size:11px; color:#94A3B8; text-transform:uppercase; margin-bottom:4px;">Suggested Logger Statements</div>
+                  <pre style="background:#0F172A; color:#E2E8F0; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto; margin:0; border:1px dashed ${severity.color};">logger.debug("${fieldName}=" + ${fieldName}.getValue());
+${associatedWS ? `logger.debug("Response Code=" + ${associatedWS.name}.getResponseCode());\nlogger.debug("Response=" + ${associatedWS.name}.getRawResponse());` : ''}</pre>
+                </div>
+
+                <div style="margin-top:12px;">
+                  <div style="font-size:11px; color:#94A3B8; text-transform:uppercase; margin-bottom:4px;">Suggested Status Messages</div>
+                  <pre style="background:#0F172A; color:#E2E8F0; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto; margin:0; border:1px dashed ${severity.color};">flexi.setStatusMessage("Please select a valid ${fieldName} value");
+${associatedWS ? `flexi.setStatusMessage("${associatedWS.name} API Failed");` : ''}</pre>
+                </div>
+              </div>
+            `;
+         }
+
+         screenCodeHtml += `
+           <div style="background:${severity.badge !== '🟢 Informational' ? `rgba(${hexToRgb(severity.color)}, 0.05)` : 'rgba(255,255,255,0.02)'}; padding:16px; border:1px solid ${severity.badge !== '🟢 Informational' ? `rgba(${hexToRgb(severity.color)}, 0.3)` : 'rgba(255,255,255,0.04)'}; border-radius:8px;">
+             <div style="display:flex; justify-content:space-between; align-items:center;">
+               <h4 style="margin:0; color:${severity.color}; font-size:14px; display:flex; align-items:center; gap:8px;">
+                 Field: ${escHtml(fieldName)}
+               </h4>
+               <span style="background:${severity.color}20; color:${severity.color}; padding:4px 8px; border-radius:12px; font-size:11px; font-weight:bold;">${severity.badge}</span>
+             </div>
+             ${debuggerAssitantHtml}
+             ${wsHtml}
+             ${eventsHtml}
+           </div>
+         `;
+      }
     }
-
-    coverageItems.push({
-      field,
-      hasLogger,
-      hasStatusMessage
-    });
-
-    // Suggest missing loggers
-    if (field === failingField || (!hasLogger && (field === 'SUBINV' || field === 'LOCATOR' || field === 'QTY' || field === 'LOT'))) {
-      const codeSuggestion = `logger.debug("${field} value=" + ${field}.getValue());`;
-      suggestionsLoggers.push({
-        field,
-        event: eventName,
-        current: eventCode ? eventCode.trim() : `// Empty ${eventName} event handler`,
-        suggested: codeSuggestion,
-        reason: `${field} field value is currently not traceable during execution failures. Adding a trace logger enables live monitoring of scanning inputs.`
-      });
-    }
-
-    // Suggest missing status messages
-    if (field === failingField || (!hasStatusMessage && (field === 'SUBINV' || field === 'QTY' || field === 'LOT'))) {
-      const statusSuggestion = `flexi.setStatusMessage("${field} is required. Please scan or enter a value.");`;
-      suggestionsStatus.push({
-        field,
-        event: eventName,
-        suggested: statusSuggestion,
-        reason: `If validation fails or field is skipped, the user currently receives no visual error feedback in the scanner interface. Adding a status message tells them exactly how to proceed.`
-      });
-    }
-  });
-
-  // API Debugging suggestions
-  if (screenDef.webservices) {
-    for (const [wsName, ws] of Object.entries(screenDef.webservices)) {
-      const apiCode = `logger.debug("${wsName} Response Code=" + ${wsName}.getResponseCode());\nlogger.debug("${wsName} Response=" + ${wsName}.getRawResponse());`;
-      apiDebuggingList.push({
-        name: wsName,
-        endpoint: ws.request,
-        suggested: apiCode,
-        reason: `Monitors downstream WebService response status and logs any JSON/HTML payload payload schema mismatches.`
-      });
-    }
-  }
-
-  // Debugging Steps
-  const debuggingSteps = [];
-  let stepIndex = 1;
-  if (failingField) {
-    debuggingSteps.push({
-      num: `Step ${stepIndex++}`,
-      desc: `Verify value of component <code>${failingField}</code> prior to event <code>${failingEvent}</code>.`,
-      logger: `logger.debug("${failingField} value=" + ${failingField}.getValue());`
-    });
-  }
-  if (failingApi) {
-    debuggingSteps.push({
-      num: `Step ${stepIndex++}`,
-      desc: `Check downstream API response code and raw body for service <code>${failingApi}</code>.`,
-      logger: `logger.debug("${failingApi} Code=" + ${failingApi}.getResponseCode());\nlogger.debug("${failingApi} Body=" + ${failingApi}.getRawResponse());`
-    });
-  }
-  if (failingObject) {
-    debuggingSteps.push({
-      num: `Step ${stepIndex++}`,
-      desc: `Verify active lifecycle status of runtime object <code>${failingObject}</code>.`,
-      logger: `logger.debug("flexiObject ${failingObject}=" + flexi.getObject("${failingObject}"));`
-    });
-  }
-  if (debuggingSteps.length < 3) {
-    debuggingSteps.push({
-      num: `Step ${stepIndex++}`,
-      desc: "Check session organization ID parameters to verify API connection authorization context.",
-      logger: 'logger.debug("SCM_ORG_ID=" + flexi.getSessionObject("ORACLE_SCM_ORG_ID"));'
-    });
-  }
-  if (debuggingSteps.length < 4) {
-    debuggingSteps.push({
-      num: `Step ${stepIndex++}`,
-      desc: "Track active user ID and thread identifier for transaction audit tracing.",
-      logger: 'logger.info("Thread Context = " + Thread.currentThread().getName());'
-    });
-  }
-
-  // Construct findings layout
-  let analysisHtml = "";
-
-  // 1. Logger Coverage checklist card
-  const checklistRows = coverageItems.map(item => `
-    <div class="dbg-coverage-item">
-      <span style="font-family:'Fira Code', monospace; font-weight:700;">${escHtml(item.field)}</span>
-      <div style="display:flex; gap:6px;">
-        <span class="dbg-coverage-badge ${item.hasLogger ? 'logged' : 'missing'}">
-          ${item.hasLogger ? '✓ Logger' : '✗ Unlogged'}
-        </span>
-        <span class="dbg-coverage-badge ${item.hasStatusMessage ? 'logged' : 'missing'}">
-          ${item.hasStatusMessage ? '✓ Status Msg' : '✗ No Status Msg'}
-        </span>
-      </div>
-    </div>
-  `).join('');
-
-  analysisHtml += `
-    <div class="dbg-copilot-section">
-      <div class="dbg-copilot-title">
-        <span>📊</span> LOGGER COVERAGE ANALYSIS
-      </div>
-      <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:8px;">Logs analyze whether active fields include tracing and message alerts in their scripts.</div>
-      <div class="dbg-coverage-list">
-        ${checklistRows}
-      </div>
-    </div>
-  `;
-
-  // 2. Suggested Loggers Card
-  if (suggestionsLoggers.length) {
-    const sLogList = suggestionsLoggers.map(s => `
-      <div style="border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-family:'Fira Code', monospace; font-weight:700; color:var(--primary); font-size:13px;">${escHtml(s.field)} (${escHtml(s.event)})</span>
-          <span style="font-size:10px; background:#EFF6FF; color:#3B82F6; font-weight:600; padding:2px 8px; border-radius:10px;">Recommended Tracing</span>
-        </div>
-        <div style="font-size:12px; color:var(--text-normal); margin-bottom:6px;"><strong>Reason:</strong> ${escHtml(s.reason)}</div>
-        <pre style="background:#0F172A; color:#86EFAC; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto;">${escHtml(s.suggested)}</pre>
-      </div>
-    `).join('');
+    screenCodeHtml += '</div>';
 
     analysisHtml += `
       <div class="dbg-copilot-section">
-        <div class="dbg-copilot-title" style="color:var(--primary);">
-          <span>📝</span> RECOMMENDED LOGGER IMPROVEMENTS
+        <div class="dbg-copilot-title" style="color:#38BDF8; font-size:14px; border-bottom:1px solid rgba(56, 189, 248, 0.2); padding-bottom:8px; margin-bottom:16px;">
+          <span>🧠</span> FIELD-LEVEL INVESTIGATION & LOG CORRELATION
         </div>
-        <div>
-          ${sLogList}
-        </div>
+        ${screenCodeHtml}
       </div>
     `;
   }
-
-  // 3. Suggested User Status Message Alerts
-  if (suggestionsStatus.length) {
-    const sStatList = suggestionsStatus.map(s => `
-      <div style="border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-family:'Fira Code', monospace; font-weight:700; color:var(--success); font-size:13px;">${escHtml(s.field)} (${escHtml(s.event)})</span>
-          <span style="font-size:10px; background:#F0FDF4; color:#16A34A; font-weight:600; padding:2px 8px; border-radius:10px;">Feedback Alert</span>
-        </div>
-        <div style="font-size:12px; color:var(--text-normal); margin-bottom:6px;"><strong>Reason:</strong> ${escHtml(s.reason)}</div>
-        <pre style="background:#0F172A; color:#86EFAC; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto;">${escHtml(s.suggested)}</pre>
-      </div>
-    `).join('');
-
-    analysisHtml += `
-      <div class="dbg-copilot-section">
-        <div class="dbg-copilot-title" style="color:var(--success);">
-          <span>💬</span> RECOMMENDED USER STATUS FEEDBACK
-        </div>
-        <div>
-          ${sStatList}
-        </div>
-      </div>
-    `;
-  }
-
-  // 4. API Debugging Details
-  if (apiDebuggingList.length) {
-    const apiDList = apiDebuggingList.map(a => `
-      <div style="border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span style="font-family:'Fira Code', monospace; font-weight:700; color:#7C3AED; font-size:13px;">${escHtml(a.name)}</span>
-          <span style="font-size:10px; background:#F5F3FF; color:#7C3AED; font-weight:600; padding:2px 8px; border-radius:10px;">Integration Log</span>
-        </div>
-        <div style="font-size:12px; color:var(--text-normal); margin-bottom:6px;"><strong>Endpoint:</strong> <code>${escHtml(a.endpoint)}</code></div>
-        <div style="font-size:12px; color:var(--text-normal); margin-bottom:6px;"><strong>Reason:</strong> ${escHtml(a.reason)}</div>
-        <pre style="background:#0F172A; color:#86EFAC; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto;">${escHtml(a.suggested)}</pre>
-      </div>
-    `).join('');
-
-    analysisHtml += `
-      <div class="dbg-copilot-section">
-        <div class="dbg-copilot-title" style="color:#7C3AED;">
-          <span>🌐</span> WEB SERVICE API LOG RECOMMENDATIONS
-        </div>
-        <div>
-          ${apiDList}
-        </div>
-      </div>
-    `;
-  }
-
-  // 5. Debugging Guide / Steps Card
-  const guideSteps = debuggingSteps.map(step => `
-    <div class="dbg-step-item">
-      <div class="dbg-step-num">${escHtml(step.num)}</div>
-      <div class="dbg-step-desc">${step.desc}</div>
-      <pre style="background:#0F172A; color:#E2E8F0; padding:10px; border-radius:6px; font-family:monospace; font-size:11.5px; overflow-x:auto; margin:0; border:1px solid rgba(255,255,255,0.06);">${escHtml(step.logger)}</pre>
-    </div>
-  `).join('');
-
-  analysisHtml += `
-    <div class="dbg-copilot-section" style="border-left: 4px solid var(--primary);">
-      <div class="dbg-copilot-title" style="color:var(--primary);">
-        <span>🛠️</span> PRODUCTION DEBUGGING GUIDE
-      </div>
-      <div style="font-size:13px; line-height:1.6; color:var(--text-normal); margin-bottom:12px; background:rgba(59,130,246,0.04); border:1px dashed rgba(59,130,246,0.2); padding:12px; border-radius:6px;">
-        <strong>Senior Support Engineer Mentoring Advice:</strong><br>
-        In Flexi development, the error type itself is often clear (such as a NullPointerException), but finding which component fields or transaction values were mismatched requires structured tracing. 
-        Follow the exact sequence below to add debug logs at strategic boundaries to inspect runtime state variables.
-      </div>
-      <div>
-        ${guideSteps}
-      </div>
-    </div>
-  `;
 
   $('dbg-analysis-panel').innerHTML = analysisHtml;
+}
+
+// Helper to convert hex to rgb for rgba transparency
+function hexToRgb(hex) {
+  var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? `parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '255, 255, 255';
 }
 
 // ─── Helper Extractors ────────────────────────────────────────────────────────
