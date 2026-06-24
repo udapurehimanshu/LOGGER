@@ -20,6 +20,7 @@ const STATE = {
   isLoading: false,   // Guard to prevent duplicate/concurrent uploads
   screenDefinition: null,
   currentScreenFile: null,
+  filterByScreen: false,
 };
 
 // ─── PII Redaction Engine ───────────────────────────────────────────────────────────
@@ -2753,6 +2754,132 @@ function generateAIAnswer(q) {
 <pre style="font-family:'Fira Code', monospace; background:#0F172A; color:#E2E8F0; padding:15px; border-radius:8px; overflow-x:auto; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all;">${escHtml(reportText)}</pre>`;
 }
 
+
+function showScreenLoadingUI(filename) {
+  const title = document.getElementById('upload-loading-title');
+  if (title) title.textContent = "Parsing Screen Definition…";
+  const steps = document.getElementById('upload-loading-steps');
+  if (steps) steps.style.display = 'none';
+  const bar = document.getElementById('upload-progress-bar');
+  if (bar) { bar.style.display = 'block'; bar.classList.add('active'); }
+  const fill = document.getElementById('upload-progress-fill');
+  if (fill) fill.style.width = '0%';
+  const cardFill = document.getElementById('upload-card-progress-fill');
+  if (cardFill) cardFill.style.width = '0%';
+  const card = document.getElementById('upload-loading-card');
+  const fname = document.getElementById('upload-loading-filename');
+  if (card) card.style.display = 'flex';
+  if (fname) fname.textContent = filename || 'Screen JSON';
+}
+
+function handleScreenSelect(file) {
+  showScreenLoadingUI(file.name);
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    try {
+      const progressFill = pct => {
+        const fill = document.getElementById('upload-progress-fill');
+        if (fill) fill.style.width = pct + '%';
+        const cardFill = document.getElementById('upload-card-progress-fill');
+        if (cardFill) cardFill.style.width = pct + '%';
+      };
+      progressFill(50);
+      await new Promise(r => setTimeout(r, 200));
+
+      const data = JSON.parse(ev.target.result);
+      if (!data.screenName && !data.title) {
+        hideLoadingUI();
+        alert("Invalid Screen JSON format. Must contain 'screenName' or 'title'.");
+        return;
+      }
+      
+      STATE.screenDefinition = data;
+      STATE.currentScreenFile = file.name;
+      const screenNameEl = document.getElementById('sidebar-screen-name');
+      if (screenNameEl) screenNameEl.textContent = file.name;
+      
+      progressFill(100);
+      await new Promise(r => setTimeout(r, 150));
+      hideLoadingUI();
+      
+      // Prompt user with modal dialog
+      showScreenFilterModal();
+
+    } catch(err) {
+      console.error(err);
+      hideLoadingUI();
+      alert("Error parsing Screen JSON file.");
+    }
+  };
+  reader.readAsText(file);
+}
+
+
+function showScreenFilterModal() {
+  const modal = document.getElementById('screen-filter-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  const yesBtn = document.getElementById('screen-filter-yes-btn');
+  const noBtn = document.getElementById('screen-filter-no-btn');
+
+  const newYesBtn = yesBtn.cloneNode(true);
+  const newNoBtn = noBtn.cloneNode(true);
+  yesBtn.parentNode.replaceChild(newYesBtn, yesBtn);
+  noBtn.parentNode.replaceChild(newNoBtn, noBtn);
+
+  const reAnalyze = () => {
+    if (!STATE.parsed || STATE.parsed.length === 0) return;
+
+    let targetParsed = STATE.parsed;
+    if (STATE.filterByScreen) {
+       targetParsed = STATE.parsed.filter(r => isLogRelatedToScreen(r.message));
+    }
+
+    // Re-run the full analysis on the filtered log data
+    STATE.analysis = analyzeAll(targetParsed, STATE.rawLines);
+    
+    // Refresh all views
+    renderDashboard(STATE.analysis);
+    applyFilters();
+    renderTimeline(targetParsed);
+    if (typeof renderWMSFlow === 'function') renderWMSFlow(STATE.analysis.flow, STATE.analysis);
+    if (typeof renderApiTracker === 'function') renderApiTracker(STATE.analysis.apis);
+    runScreenDebuggerAnalysis();
+  };
+
+  newYesBtn.addEventListener('click', () => {
+    STATE.filterByScreen = true;
+    modal.style.display = 'none';
+    reAnalyze();
+  });
+
+  newNoBtn.addEventListener('click', () => {
+    STATE.filterByScreen = false;
+    modal.style.display = 'none';
+    reAnalyze();
+  });
+}
+
+function isLogRelatedToScreen(logMsg) {
+  if (!STATE.screenDefinition) return true;
+  const def = STATE.screenDefinition;
+  const queryWords = [];
+  if (def.screenName) queryWords.push(def.screenName.toLowerCase());
+  if (def.title) queryWords.push(def.title.toLowerCase());
+  if (def.module) queryWords.push(def.module.toLowerCase());
+  
+  if (def.fields) {
+    Object.keys(def.fields).forEach(f => queryWords.push(f.toLowerCase()));
+  }
+
+  const msg = logMsg.toLowerCase();
+  for (const qw of queryWords) {
+    if (msg.includes(qw)) return true;
+  }
+  return false;
+}
+
 function runScreenDebuggerAnalysis() {
   const $ = id => document.getElementById(id);
   if (!STATE.analysis) {
@@ -2770,10 +2897,11 @@ function runScreenDebuggerAnalysis() {
     return;
   }
 
-  const logText = STATE.parsed.map(e => e.message).join('\n');
+  const activeParsed = STATE.filterByScreen ? STATE.parsed.filter(r => isLogRelatedToScreen(r.message)) : STATE.parsed;
+  const logText = activeParsed.map(e => e.message).join('\n');
 
-  // Find screen definition
-  return; // Screen Debugger removed
+  const isSimulated = false;
+  if (!screenDef) return;
 
   // Parse details
   const name = screenDef.screenName || screenDef.name || "Unknown Screen";
@@ -3102,6 +3230,7 @@ function switchView(viewId) {
 function applyFilters() {
   const q = document.getElementById('search-input').value.trim();
   STATE.filtered = STATE.parsed.filter(row => {
+    if (STATE.filterByScreen && !isLogRelatedToScreen(row.message)) return false;
     if (!STATE.activeLevels.has(row.level)) return false;
     if (!q) return true;
     if (STATE.regexMode) {
@@ -3489,6 +3618,27 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
+
+  // Screen JSON upload
+  const uploadScreenBtn = document.getElementById('upload-screen-btn');
+  if (uploadScreenBtn) {
+    uploadScreenBtn.addEventListener('click', () => {
+      const screenInput = document.getElementById('screen-input');
+      if (screenInput) {
+        screenInput.value = '';
+        screenInput.click();
+      }
+    });
+  }
+  const screenInput = document.getElementById('screen-input');
+  if (screenInput) {
+    screenInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      handleScreenSelect(file);
+      e.target.value = '';
+    });
+  }
 
   // File upload
   document.getElementById('upload-btn').addEventListener('click', () => {

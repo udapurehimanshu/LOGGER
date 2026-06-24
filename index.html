@@ -96,7 +96,16 @@
       <input type="file" id="file-input" style="display:none" accept=".log,.txt,.json,.xml,.csv,.zip">
       <div class="sidebar-file-name" id="sidebar-file-name">No file loaded</div>
 
-      
+      <button class="upload-btn-sidebar" id="upload-screen-btn" style="margin-top: 10px; background: rgba(59, 130, 246, 0.06); border-color: rgba(59, 130, 246, 0.2); color: #60A5FA;">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+        Upload Screen JSON
+      </button>
+      <input type="file" id="screen-input" style="display:none" accept=".json">
+      <div class="sidebar-file-name" id="sidebar-screen-name">No Screen JSON loaded</div>
     </div>
 
     <!-- Paste -->
@@ -966,6 +975,18 @@
 
     </div><!-- /views-area -->
   </div><!-- /main -->
+
+  <!-- Screen Filter Modal -->
+  <div id="screen-filter-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+    <div style="background:#1E293B; border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:24px; max-width:400px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
+      <h3 style="margin:0 0 12px 0; color:#F8FAFC; font-size:18px;">Filter by Uploaded Screen?</h3>
+      <p style="color:#94A3B8; font-size:14px; margin-bottom:24px; line-height:1.5;">Do you want to see logs related to the uploaded screen only?</p>
+      <div style="display:flex; gap:12px; justify-content:center;">
+        <button id="screen-filter-yes-btn" style="background:#3B82F6; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600; font-size:14px; transition:background 0.2s;">Yes</button>
+        <button id="screen-filter-no-btn" style="background:rgba(255,255,255,0.1); color:#E2E8F0; border:1px solid rgba(255,255,255,0.1); padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600; font-size:14px; transition:background 0.2s;">No</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Drag-drop overlay (invisible, global) -->
   <div id="drop-overlay"
