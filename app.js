@@ -106,6 +106,50 @@ const MODULE_KB = {
   'Caching Layer':   ['cache', 'Cache', 'redis', 'Redis', 'memcache', 'evict'],
 };
 
+const PROPERTY_MAP = {
+  id: 'ID',
+  label: 'Label',
+  style: 'Style',
+  controlType: 'Style',
+  isPassword: 'Is Password',
+  password: 'Is Password',
+  rendered: 'Rendered',
+  renderedLogic: 'Rendered Logic',
+  autoEnter: 'Auto Enter',
+  required: 'Required',
+  readOnly: 'Read Only',
+  alterCase: 'Alter Case',
+  defaultValue: 'Default Value',
+  length: 'Length',
+  dfi: 'DFI',
+  dfiRequired: 'DFI Required',
+  barcodeDelimiter: 'Barcode Delimiter',
+  subsequentValue: 'Subsequent Value',
+  onFocus: 'On Focus',
+  onFocusScript: 'On Focus',
+  beforeExit: 'Before Exit',
+  beforeExitScript: 'Before Exit',
+  onExit: 'On Exit',
+  onExitScript: 'On Exit',
+  onKeyPress: 'On Key Press',
+  onKeyPressScript: 'On Key Press',
+  dateFormat: 'Date Format',
+  lovSourceType: 'LOV Source Type',
+  webService: 'Web Service',
+  lovPageTitle: 'LOV Page Title',
+  lovStatement: 'LOV Statement',
+  inputParameter: 'Input Parameter',
+  parameterTypes: 'Parameter Types',
+  columnDisplay: 'Column Display',
+  columnPrompt: 'Column Prompt',
+  addPercent: 'Add %',
+  lovValidation: 'LOV Validation',
+  blindSearch: 'Blind Search',
+  enableGenerate: 'Enable Generate',
+  scanOnly: 'Scan Only',
+  textAlignment: 'Text Alignment'
+};
+
 const WMS_FLOW_TEMPLATES = {
   'API Layer': [
     { id: 'req_recv',   label: 'Request Received',      keywords: ['request', 'started', 'Initiating'] },
@@ -2803,19 +2847,127 @@ function handleScreenSelect(file) {
 
       let data;
       try {
-        data = JSON.parse(ev.target.result);
-        const deepFields = deepFindKey(data, 'fields');
-        const deepWS = deepFindKey(data, 'webservices');
+        const parsedJson = JSON.parse(ev.target.result);
         
-        if (!data.screenName && !data.title && !deepFields) {
+        // Helper to extract fields recursively from the JSON tree
+        const extractFieldsFromJSON = (obj, fieldsList = []) => {
+          if (typeof obj !== 'object' || obj === null) return fieldsList;
+
+          if (obj.properties && typeof obj.properties === 'object') {
+             const props = obj.properties;
+             const propsHasId = typeof props.id === 'string' && props.id.trim() !== '';
+             if (propsHasId && (
+               'label' in props || 
+               'required' in props || 
+               'readOnly' in props ||
+               'onExit' in props || 
+               'onFocus' in props || 
+               'webService' in props
+             )) {
+                fieldsList.push({
+                   ...props,
+                   type: obj.type || props.type || 'Field'
+                });
+             }
+          } else {
+             const hasId = typeof obj.id === 'string' && obj.id.trim() !== '';
+             const isField = hasId && (
+               'label' in obj || 
+               'required' in obj || 
+               'readOnly' in obj || 
+               'onExit' in obj || 
+               'onFocus' in obj || 
+               'webService' in obj || 
+               'lovSourceType' in obj ||
+               obj.type === 'Field' ||
+               obj.controlType === 'Field' ||
+               obj.style === 'Normal' ||
+               obj.style === 'Barcode'
+             );
+             if (isField) {
+                fieldsList.push(obj);
+             }
+          }
+
+          for (let key in obj) {
+             if (key !== 'properties' && typeof obj[key] === 'object') {
+                extractFieldsFromJSON(obj[key], fieldsList);
+             }
+          }
+          return fieldsList;
+        };
+
+        let fieldsArray = extractFieldsFromJSON(parsedJson);
+        if (!fieldsArray || fieldsArray.length === 0) {
+           const deepFields = deepFindKey(parsedJson, 'fields');
+           if (deepFields) {
+              if (Array.isArray(deepFields)) {
+                 fieldsArray = deepFields;
+              } else if (typeof deepFields === 'object') {
+                 fieldsArray = Object.entries(deepFields).map(([name, props]) => {
+                    return { id: name, ...props };
+                 });
+              }
+           }
+        }
+
+        let wsMap = {};
+        const deepWS = deepFindKey(parsedJson, 'webservices') || deepFindKey(parsedJson, 'webServices') || deepFindKey(parsedJson, 'web_services');
+        if (deepWS) {
+           if (Array.isArray(deepWS)) {
+              deepWS.forEach(ws => {
+                 if (ws.name || ws.id) wsMap[ws.name || ws.id] = ws;
+              });
+           } else if (typeof deepWS === 'object') {
+              wsMap = deepWS;
+           }
+        }
+
+        if (fieldsArray.length === 0 && !parsedJson.screenName && !parsedJson.title) {
            data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
         } else {
-           if (!data.fields && deepFields) data.fields = deepFields;
-           if (!data.webservices && deepWS) data.webservices = deepWS;
-           if (!data.screenName) data.screenName = file.name;
+           // Normalize fields format for log correlation
+           const normalizedFields = {};
+           fieldsArray.forEach(f => {
+              const fieldName = f.id || f.name;
+              if (!fieldName) return;
+              
+              const events = {};
+              const onFocusVal = f.onFocus || f.onFocusScript || f.OnFocus || (f.events && f.events.onFocus) || (f.events && f.events.OnFocus);
+              if (onFocusVal) events["OnFocus"] = { code: typeof onFocusVal === 'string' ? onFocusVal : (onFocusVal.code || '') };
+              
+              const onExitVal = f.onExit || f.onExitScript || f.OnExit || (f.events && f.events.onExit) || (f.events && f.events.OnExit);
+              if (onExitVal) events["OnExit"] = { code: typeof onExitVal === 'string' ? onExitVal : (onExitVal.code || '') };
+
+              const beforeExitVal = f.beforeExit || f.beforeExitScript || f.BeforeExit || (f.events && f.events.beforeExit) || (f.events && f.events.BeforeExit);
+              if (beforeExitVal) events["BeforeExit"] = { code: typeof beforeExitVal === 'string' ? beforeExitVal : (beforeExitVal.code || '') };
+
+              const onKeyPressVal = f.onKeyPress || f.onKeyPressScript || f.OnKeyPress || (f.events && f.events.onKeyPress) || (f.events && f.events.OnKeyPress);
+              if (onKeyPressVal) events["OnKeyPress"] = { code: typeof onKeyPressVal === 'string' ? onKeyPressVal : (onKeyPressVal.code || '') };
+
+              if (typeof f === 'object') {
+                 for (let key in f) {
+                    if (['onfocus', 'onexit', 'beforeexit', 'onkeypress'].includes(key.toLowerCase())) {
+                       const cleanName = key.charAt(0).toUpperCase() + key.slice(1);
+                       if (!events[cleanName]) {
+                          events[cleanName] = { code: typeof f[key] === 'string' ? f[key] : (f[key].code || '') };
+                       }
+                    }
+                 }
+              }
+              normalizedFields[fieldName] = events;
+           });
+
+           data = {
+              screenName: parsedJson.screenName || parsedJson.name || file.name,
+              title: parsedJson.title || parsedJson.screenTitle || parsedJson.name || file.name,
+              fields: normalizedFields,
+              fullFieldsList: fieldsArray,
+              webservices: wsMap,
+              rawCode: ev.target.result
+           };
         }
       } catch (err) {
-        // Not a JSON file, treat as raw code
         data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
       }
 
@@ -3220,8 +3372,250 @@ ${associatedWS ? `flexi.setStatusMessage("${associatedWS.name} API Failed");` : 
     `;
   }
 
-  $('dbg-analysis-panel').innerHTML = analysisHtml;
+  // Build Fields Properties Builder HTML
+  let fieldsInspectorHtml = '';
+  if (screenDef.fullFieldsList && screenDef.fullFieldsList.length > 0) {
+     const fields = screenDef.fullFieldsList;
+     
+     if (!STATE.activeDbgField && fields.length > 0) {
+        STATE.activeDbgField = fields[0].id || fields[0].name;
+     }
+
+     let fieldButtonsHtml = '';
+     fields.forEach(f => {
+        const fName = f.id || f.name;
+        const isActive = fName === STATE.activeDbgField;
+        fieldButtonsHtml += `
+           <button class="dbg-field-item-btn ${isActive ? 'active' : ''}" 
+                   data-fieldname="${escHtml(fName)}"
+                   onclick="selectDbgField('${escHtml(fName)}')">
+              🔑 ${escHtml(fName)}
+           </button>
+        `;
+     });
+
+     const activeFieldObj = fields.find(f => (f.id || f.name) === STATE.activeDbgField) || fields[0];
+     let propertiesRowsHtml = '';
+     
+     if (activeFieldObj) {
+        const knownPropKeys = [
+          'id', 'label', 'style', 'isPassword', 'password', 'rendered', 'renderedLogic', 
+          'autoEnter', 'required', 'readOnly', 'alterCase', 'defaultValue', 'length', 
+          'dfi', 'dfiRequired', 'barcodeDelimiter', 'subsequentValue', 'onFocus', 'onFocusScript',
+          'beforeExit', 'beforeExitScript', 'onExit', 'onExitScript', 'onKeyPress', 'onKeyPressScript',
+          'dateFormat', 'lovSourceType', 'webService', 'lovPageTitle', 'lovStatement', 
+          'inputParameter', 'parameterTypes', 'columnDisplay', 'columnPrompt', 'addPercent', 
+          'lovValidation', 'blindSearch', 'enableGenerate', 'scanOnly', 'textAlignment'
+        ];
+
+        const processedKeys = new Set();
+
+        const renderRow = (key, val) => {
+           processedKeys.add(key);
+           const title = PROPERTY_MAP[key] || key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1').trim();
+           
+           let valueHtml = '';
+           const isBoolean = typeof val === 'boolean' || val === 'true' || val === 'false';
+           
+           if (isBoolean) {
+              const checked = val === true || val === 'true';
+              valueHtml = `<input type="checkbox" disabled ${checked ? 'checked' : ''} style="accent-color:#3B82F6; cursor:default; width: 14px; height: 14px;">`;
+           } else if (['onFocus', 'onFocusScript', 'beforeExit', 'beforeExitScript', 'onExit', 'onExitScript', 'onKeyPress', 'onKeyPressScript', 'renderedLogic', 'lovStatement'].includes(key)) {
+              if (val && typeof val === 'string' && val.trim() !== '') {
+                 valueHtml = `<button class="prop-script-btn" onclick="showScriptModal('${escHtml(activeFieldObj.id || activeFieldObj.name)}', '${escHtml(key)}')"><span class="script-badge-icon">A</span> View Script</button>`;
+              } else {
+                 valueHtml = `<button class="prop-script-btn disabled" disabled><span class="script-badge-icon">A</span> Empty</button>`;
+              }
+           } else {
+              valueHtml = val !== undefined && val !== null ? escHtml(String(val)) : '<span style="color:#475569;">—</span>';
+           }
+
+           return `
+              <tr>
+                 <td>${escHtml(title)}</td>
+                 <td>${valueHtml}</td>
+              </tr>
+           `;
+        };
+
+        knownPropKeys.forEach(k => {
+           let resolvedKey = k;
+           let hasKey = k in activeFieldObj;
+           if (!hasKey) {
+              if (k === 'style' && 'controlType' in activeFieldObj) resolvedKey = 'controlType';
+              else if (k === 'isPassword' && 'password' in activeFieldObj) resolvedKey = 'password';
+              else if (k === 'onFocus' && 'onFocusScript' in activeFieldObj) resolvedKey = 'onFocusScript';
+              else if (k === 'beforeExit' && 'beforeExitScript' in activeFieldObj) resolvedKey = 'beforeExitScript';
+              else if (k === 'onExit' && 'onExitScript' in activeFieldObj) resolvedKey = 'onExitScript';
+              else if (k === 'onKeyPress' && 'onKeyPressScript' in activeFieldObj) resolvedKey = 'onKeyPressScript';
+              else if (k === 'lovSourceType' && 'lov_source_type' in activeFieldObj) resolvedKey = 'lov_source_type';
+              else if (k === 'webService' && 'webservice' in activeFieldObj) resolvedKey = 'webservice';
+              else return;
+           }
+           
+           if (!processedKeys.has(resolvedKey)) {
+              propertiesRowsHtml += renderRow(resolvedKey, activeFieldObj[resolvedKey]);
+           }
+        });
+
+        Object.entries(activeFieldObj).forEach(([k, val]) => {
+           if (!processedKeys.has(k) && k !== 'events') {
+              propertiesRowsHtml += renderRow(k, val);
+           }
+        });
+     }
+
+     fieldsInspectorHtml = `
+       <div id="dbg-tab-content-fields" style="display:${STATE.activeDbgTab === 'fields' ? 'flex' : 'none'}; gap:16px; height:100%; min-height:480px; margin-top: 12px;">
+         <!-- Left Sidebar: Fields List -->
+         <div style="width:230px; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.08); padding-right:16px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; max-height: 520px;">
+            <div style="font-size:11px; font-weight:700; color:#94A3B8; letter-spacing:0.8px; text-transform:uppercase;">Screen Fields (${fields.length})</div>
+            <input type="text" id="dbg-field-search" oninput="filterDbgFields()" placeholder="Search fields..." style="width:100%; background:#0F172A; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:6px 10px; color:white; font-size:12px; margin-bottom:4px;">
+            <div id="dbg-fields-list-container" style="display:flex; flex-direction:column; gap:4px;">
+               ${fieldButtonsHtml}
+            </div>
+         </div>
+         
+         <!-- Right Main Area: Field Properties Table -->
+         <div style="flex-grow:1; overflow-y:auto; padding-left:16px; max-height: 520px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:10px; margin-bottom:14px;">
+               <div style="font-size:14px; font-weight:700; color:#38BDF8;">🔑 Properties Builder for: ${escHtml(STATE.activeDbgField || '')}</div>
+               <span style="background:rgba(56,189,248,0.1); color:#38BDF8; font-size:11px; padding:2px 8px; border-radius:12px; font-weight:600;">Flexi Field Component</span>
+            </div>
+            <table class="prop-table">
+               <thead>
+                  <tr>
+                     <th>Property Name</th>
+                     <th>Value</th>
+                  </tr>
+               </thead>
+               <tbody id="dbg-properties-table-body">
+                  ${propertiesRowsHtml}
+               </tbody>
+            </table>
+         </div>
+       </div>
+     `;
+  } else {
+     fieldsInspectorHtml = `
+       <div id="dbg-tab-content-fields" style="display:none; padding:40px 20px; text-align:center; color:var(--text-muted);">
+         <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" style="margin-bottom:12px; color:#475569;">
+           <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+         </svg>
+         <h3>No Structured Fields Found</h3>
+         <p style="font-size:13px; max-width:400px; margin:8px auto 0 auto;">This view is active for screen JSON exports. If you uploaded a raw code file, use the Copilot Investigation or view the Raw Code below.</p>
+       </div>
+     `;
+  }
+
+  const activeTab = STATE.activeDbgTab || 'analysis';
+  
+  $('dbg-analysis-panel').innerHTML = `
+    <!-- Tab Bar -->
+    <div class="dbg-tab-bar">
+      <button class="dbg-tab ${activeTab === 'analysis' ? 'active' : ''}" onclick="switchDbgTab('analysis')">🩺 Copilot Investigation</button>
+      <button class="dbg-tab ${activeTab === 'fields' ? 'active' : ''}" onclick="switchDbgTab('fields')">📋 Screen Fields Properties</button>
+    </div>
+    
+    <!-- Tab content 1: Analysis -->
+    <div id="dbg-tab-content-analysis" style="display:${activeTab === 'analysis' ? 'block' : 'none'};">
+       ${analysisHtml}
+    </div>
+    
+    <!-- Tab content 2: Fields Inspector -->
+    ${fieldsInspectorHtml}
+  `;
 }
+
+// Global helpers for Screen Debugger tab and fields selection
+window.switchDbgTab = function(tabId) {
+  STATE.activeDbgTab = tabId;
+  const analysisEl = document.getElementById('dbg-tab-content-analysis');
+  const fieldsEl = document.getElementById('dbg-tab-content-fields');
+  const tabs = document.querySelectorAll('.dbg-tab');
+  
+  if (analysisEl && fieldsEl) {
+     if (tabId === 'analysis') {
+        analysisEl.style.display = 'block';
+        fieldsEl.style.display = 'none';
+        tabs[0].classList.add('active');
+        tabs[1].classList.remove('active');
+     } else {
+        analysisEl.style.display = 'none';
+        fieldsEl.style.display = 'flex'; // Use flex for side-by-side layout
+        tabs[0].classList.remove('active');
+        tabs[1].classList.add('active');
+     }
+  }
+};
+
+window.selectDbgField = function(fieldName) {
+  STATE.activeDbgField = fieldName;
+  runScreenDebuggerAnalysis();
+};
+
+window.filterDbgFields = function() {
+  const q = document.getElementById('dbg-field-search').value.toLowerCase().trim();
+  const btns = document.querySelectorAll('.dbg-field-item-btn');
+  btns.forEach(btn => {
+     const name = btn.getAttribute('data-fieldname').toLowerCase();
+     if (name.includes(q)) {
+        btn.style.display = 'block';
+     } else {
+        btn.style.display = 'none';
+     }
+  });
+};
+
+window.showScriptModal = function(fieldName, propKey) {
+  const screenDef = STATE.screenDefinition;
+  if (!screenDef || !screenDef.fullFieldsList) return;
+  
+  const fieldObj = screenDef.fullFieldsList.find(f => (f.id || f.name) === fieldName);
+  if (!fieldObj) return;
+  
+  const scriptCode = fieldObj[propKey] || '';
+  const title = PROPERTY_MAP[propKey] || propKey;
+  
+  const modal = document.getElementById('screen-script-modal');
+  const titleEl = document.getElementById('script-modal-title');
+  const codeEl = document.getElementById('script-modal-code');
+  const copyBtn = document.getElementById('copy-script-btn');
+  
+  if (modal && titleEl && codeEl) {
+     titleEl.textContent = `${fieldName} — ${title} Script`;
+     codeEl.textContent = scriptCode;
+     modal.style.display = 'flex';
+     if (copyBtn) {
+        copyBtn.textContent = 'Copy';
+        copyBtn.style.background = 'rgba(255,255,255,0.05)';
+        copyBtn.style.borderColor = 'rgba(255,255,255,0.1)';
+        copyBtn.style.color = '#E2E8F0';
+     }
+  }
+};
+
+window.closeScriptModal = function() {
+  const modal = document.getElementById('screen-script-modal');
+  if (modal) modal.style.display = 'none';
+};
+
+window.copyModalScript = function() {
+  const codeEl = document.getElementById('script-modal-code');
+  const copyBtn = document.getElementById('copy-script-btn');
+  if (codeEl) {
+     navigator.clipboard.writeText(codeEl.textContent).then(() => {
+        if (copyBtn) {
+           copyBtn.textContent = 'Copied!';
+           copyBtn.style.background = '#10B98120';
+           copyBtn.style.borderColor = '#10B981';
+           copyBtn.style.color = '#34D399';
+        }
+     }).catch(err => {
+        console.error('Failed to copy text: ', err);
+     });
+  }
+};
 
 // Helper to convert hex to rgb for rgba transparency
 function hexToRgb(hex) {
@@ -3759,5 +4153,57 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize empty state for API Tracker
   renderApiTracker(null);
+
+  // AUTO-LOAD SCREEN FOR TESTING
+  fetch('test_screen.json')
+    .then(r => r.json())
+    .then(json => {
+       STATE.screenDefinition = {
+          screenName: "test_screen.json",
+          title: "Work Order Completion",
+          fields: {
+             "ORG_CODE": { "OnExit": { code: "flexi.invokeWebService('ORG_WEBSERVICE'); logger.debug('Exiting Org field');" } },
+             "ITEM": { "OnFocus": { code: "logger.debug('Focus on Item field');" } }
+          },
+          fullFieldsList: [
+            {
+              "id": "ORG_CODE",
+              "label": "Org",
+              "style": "Normal",
+              "required": true,
+              "onExit": "flexi.invokeWebService('ORG_WEBSERVICE'); logger.debug('Exiting Org field');",
+              "lovSourceType": "Web Service",
+              "webService": "ORG_WEBSERVICE",
+              "isPassword": false,
+              "readOnly": false,
+              "addPercent": true,
+              "lovValidation": true
+            },
+            {
+              "id": "ITEM",
+              "label": "Item",
+              "style": "Barcode",
+              "required": true,
+              "onFocus": "logger.debug('Focus on Item field');",
+              "isPassword": false,
+              "readOnly": false
+            }
+          ],
+          webservices: {
+             "ORG_WEBSERVICE": { request: "http://api.com/org", response: "{ status: 'ok' }" }
+          },
+          rawCode: JSON.stringify(json, null, 2)
+       };
+       STATE.currentScreenFile = "test_screen.json";
+       const nameEl = document.getElementById('sidebar-screen-name');
+       if (nameEl) nameEl.textContent = "test_screen.json";
+       
+       // Switch default debugger active field
+       STATE.activeDbgField = "ORG_CODE";
+       
+       runScreenDebuggerAnalysis();
+    }).catch(err => {
+       console.log('No test_screen.json found or failed to load:', err);
+    });
 
 });

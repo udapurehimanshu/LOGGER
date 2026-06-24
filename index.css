@@ -2427,4 +2427,113 @@ body.privacy-active .ts-col {
   margin-bottom: 8px;
 }
 
+/* ─── Screen Debugger Fields Inspector Styles ─── */
+.dbg-tab-bar {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 16px;
+}
+.dbg-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #94A3B8;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+  margin-bottom: -1px;
+}
+.dbg-tab:hover {
+  color: #F8FAFC;
+}
+.dbg-tab.active {
+  color: #60A5FA;
+  border-bottom-color: #3B82F6;
+}
+.dbg-field-item-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94A3B8;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  width: 100%;
+  transition: all 0.2s;
+}
+.dbg-field-item-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #F8FAFC;
+}
+.dbg-field-item-btn.active {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #60A5FA;
+  font-weight: 600;
+}
+.prop-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 24px;
+}
+.prop-table th {
+  background: #1E293B;
+  color: #F8FAFC;
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.prop-table td {
+  padding: 6px 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  vertical-align: middle;
+}
+.prop-table tr td:first-child {
+  background: rgba(255,255,255,0.02);
+  color: #94A3B8;
+  font-weight: 500;
+  width: 180px;
+}
+.prop-table tr td:last-child {
+  background: rgba(0,0,0,0.1);
+  color: #F8FAFC;
+}
+.prop-script-btn {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  color: #60A5FA;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+.prop-script-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+.prop-script-btn.disabled {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.04);
+  color: #475569;
+  cursor: not-allowed;
+}
+.script-badge-icon {
+  font-weight: 800;
+  font-family: monospace;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+
 
