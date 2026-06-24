@@ -2783,6 +2783,10 @@ function deepFindKey(obj, keyToFind) {
   return null;
 }
 
+function getActiveScreenDefinition() {
+  return STATE.screenDefinition || null;
+}
+
 function handleScreenSelect(file) {
   showScreenLoadingUI(file.name);
   const reader = new FileReader();
@@ -2814,10 +2818,7 @@ function handleScreenSelect(file) {
         // Not a JSON file, treat as raw code
         data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
       }
-      } catch (err) {
-        // Not a JSON file, treat as raw code
-        data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
-      }
+
       
       STATE.screenDefinition = data;
       STATE.currentScreenFile = file.name;
