@@ -2786,11 +2786,15 @@ function handleScreenSelect(file) {
       progressFill(50);
       await new Promise(r => setTimeout(r, 200));
 
-      const data = JSON.parse(ev.target.result);
-      if (!data.screenName && !data.title) {
-        hideLoadingUI();
-        alert("Invalid Screen JSON format. Must contain 'screenName' or 'title'.");
-        return;
+      let data;
+      try {
+        data = JSON.parse(ev.target.result);
+        if (!data.screenName && !data.title && !data.fields) {
+           data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
+        }
+      } catch (err) {
+        // Not a JSON file, treat as raw code
+        data = { screenName: file.name, title: file.name, rawCode: ev.target.result };
       }
       
       STATE.screenDefinition = data;
@@ -2808,7 +2812,7 @@ function handleScreenSelect(file) {
     } catch(err) {
       console.error(err);
       hideLoadingUI();
-      alert("Error parsing Screen JSON file.");
+      alert("Error reading file.");
     }
   };
   reader.readAsText(file);
@@ -2865,8 +2869,17 @@ function isLogRelatedToScreen(logMsg) {
   if (!STATE.screenDefinition) return true;
   const def = STATE.screenDefinition;
   const queryWords = [];
-  if (def.screenName) queryWords.push(def.screenName.toLowerCase());
-  if (def.title) queryWords.push(def.title.toLowerCase());
+  if (def.screenName) {
+    let name = def.screenName.toLowerCase();
+    // Strip extension if it has one (e.g., .java, .groovy, .json)
+    if (name.includes('.')) name = name.substring(0, name.lastIndexOf('.'));
+    queryWords.push(name);
+  }
+  if (def.title) {
+    let t = def.title.toLowerCase();
+    if (t.includes('.')) t = t.substring(0, t.lastIndexOf('.'));
+    queryWords.push(t);
+  }
   if (def.module) queryWords.push(def.module.toLowerCase());
   
   if (def.fields) {
