@@ -660,8 +660,10 @@ function extractAPIs(text) {
     // Quick pre-checks to avoid matching regex on huge strings if there's no match keywords
     const hasCallWebService = msg.includes('callWebService');
     const hasInitiating = msg.includes('Initiating API call');
+    const hasRunWebService = msg.includes('runWebService');
 
-    // Check for API start
+    // ── Check for API start ───────────────────────────────────────────────────
+    // Pattern A: callWebService / Initiating API call (existing pattern)
     let nameM = null;
     if (hasCallWebService || hasInitiating) {
       nameM = msg.match(/callWebService:name:(\S+)/i) || 
@@ -670,12 +672,28 @@ function extractAPIs(text) {
               msg.match(/(\S+)\.callWebService\(\)\s*:\s*started/i);
     }
 
-    if (nameM) {
+    // Pattern B: Flexi Runtime runWebService — the start line looks like:
+    //   "ORG_WEBSERVICE.runWebService" with NO ":" after runWebService (just the name, nothing else)
+    //   vs status lines like "ORG_WEBSERVICE.runWebService: result 200" or "Total time = N ms"
+    // We detect a START only when the line ends with just ".runWebService" (maybe trailing whitespace)
+    let runWsStart = null;
+    if (!nameM && hasRunWebService) {
+      // Match lines ending with APINAME.runWebService and nothing else (or just whitespace)
+      runWsStart = msg.match(/^([A-Za-z0-9_]+)\.runWebService\s*$/i);
+      // Also handle when the full source prefix appears:
+      // "UserActionLogger - ORG_WEBSERVICE.runWebService"
+      if (!runWsStart) {
+        runWsStart = msg.match(/[\s\-]([A-Za-z0-9_]+)\.runWebService\s*$/i);
+      }
+    }
+
+    if (nameM || runWsStart) {
+      const apiName = nameM ? nameM[1] : runWsStart[1];
       if (ctx.currentApi) {
         apis.push(ctx.currentApi);
       }
       ctx.currentApi = {
-        name: nameM[1],
+        name: apiName,
         endpoint: null,
         method: 'GET',
         status: null,
@@ -690,50 +708,80 @@ function extractAPIs(text) {
     }
 
     if (ctx.currentApi) {
-      // Check for endpoint/URL
+      // ── URL / Endpoint ────────────────────────────────────────────────────
       if (msg.includes('URL') || msg.includes('Endpoint')) {
-        let urlM = msg.match(/URL\s*=\s*(\S+)/i) || msg.match(/Endpoint\s*:\s*(\S+)/i);
+        let urlM = msg.match(/URL\s*=\s*(https?:\/\/\S+)/i) ||
+                   msg.match(/URL\s*=\s*(\S+)/i) ||
+                   msg.match(/Endpoint\s*:\s*(\S+)/i);
         if (urlM) ctx.currentApi.endpoint = urlM[1];
       }
 
-      // Check for request method
+      // ── Request Method ────────────────────────────────────────────────────
       if (msg.includes('Request Method')) {
         let methodM = msg.match(/Request Method\s*=\s*(\S+)/i);
         if (methodM) ctx.currentApi.method = methodM[1];
       }
 
-      // Check for status code
+      // ── HTTP Status Code ──────────────────────────────────────────────────
+      // Standard pattern: Response Code = 200
       if (msg.includes('Response Code') || msg.includes('HTTP Response Code')) {
-        let statusM = msg.match(/Response Code\s*=\s*(\d+)/i) || msg.match(/Response Code\s*:\s*(\d+)/i) || msg.match(/HTTP Response Code\s*:\s*(\d+)/i);
+        let statusM = msg.match(/Response Code\s*=\s*(\d+)/i) ||
+                      msg.match(/Response Code\s*:\s*(\d+)/i) ||
+                      msg.match(/HTTP Response Code\s*:\s*(\d+)/i);
         if (statusM) ctx.currentApi.status = parseInt(statusM[1]);
       }
+      // Flexi Runtime pattern: "APINAME.runWebService: result 200 {...}"
+      if (hasRunWebService && msg.includes('result')) {
+        const resultStatusM = msg.match(/\.runWebService:\s*result\s+(\d{3})/i);
+        if (resultStatusM) {
+          ctx.currentApi.status = parseInt(resultStatusM[1]);
+          // Capture the response body (everything from the first '{' onwards)
+          const braceIdx = msg.indexOf('{', msg.indexOf('result'));
+          if (braceIdx !== -1) {
+            ctx.currentApi.response = msg.substring(braceIdx);
+          }
+        }
+      }
 
-      // Check for response time
-      if (msg.includes('Total time') || hasCallWebService) {
-        let timeM = msg.match(/Total time\s*=\s*(\d+)\s*ms/i) || 
-                    msg.match(/Total time\s*=\s*(\d+)/i) || 
-                    msg.match(/callWebService\(\)\s*:\s*(\d+)\s*ms/i) ||
+      // ── Response Time ─────────────────────────────────────────────────────
+      if (msg.includes('Total time')) {
+        let timeM = msg.match(/Total time\s*=\s*(\d+)\s*ms/i) ||
+                    msg.match(/Total time\s*=\s*(\d+)/i);
+        if (timeM) ctx.currentApi.ms = parseInt(timeM[1]);
+      } else if (hasCallWebService) {
+        let timeM = msg.match(/callWebService\(\)\s*:\s*(\d+)\s*ms/i) ||
                     msg.match(/callWebService\(\)\s*:\s*(\d+)/i);
         if (timeM) ctx.currentApi.ms = parseInt(timeM[1]);
       }
 
-      // Check for payloads
+      // ── Request / Response Payloads ───────────────────────────────────────
       if (msg.includes('Request Payload')) {
-        let reqM = msg.match(/Request Payload\s*:\s*(.+)$/i);
+        let reqM = msg.match(/Request Payload\s*:\s*(.+)$/is);
         if (reqM) ctx.currentApi.request = reqM[1];
       }
 
       if (msg.includes('Response Body')) {
-        let respM = msg.match(/Response Body\s*:\s*(.+)$/i);
+        let respM = msg.match(/Response Body\s*:\s*(.+)$/is);
         if (respM) {
           ctx.currentApi.response = respM[1];
         }
-      } else {
+      } else if (!ctx.currentApi.response) {
+        // Fallback: pick up bare result blocks (non-runWebService logs)
         let resultIdx = msg.indexOf('result{');
         if (resultIdx === -1) resultIdx = msg.indexOf('result {');
-        if (resultIdx !== -1) {
+        if (resultIdx !== -1 && !hasRunWebService) {
           ctx.currentApi.response = msg.substring(msg.indexOf('{', resultIdx));
         }
+      }
+
+      // ── Flush completed runWebService call (when we see "Total time =") ───
+      // Encountering Total time means this API call is done; push it so the next
+      // distinct call (same name, different thread step) starts a fresh context.
+      if (hasRunWebService && msg.includes('Total time') && ctx.currentApi) {
+        const timeM2 = msg.match(/Total time\s*=\s*(\d+)/i);
+        if (timeM2) ctx.currentApi.ms = parseInt(timeM2[1]);
+        apis.push(ctx.currentApi);
+        ctx.currentApi = null;
       }
     }
   });
@@ -4711,14 +4759,271 @@ function initDashboardClicks() {
   }
 }
 
+// ─── Streaming constants ───────────────────────────────────────────────────
+const STREAM_CHUNK_BYTES = 4 * 1024 * 1024; // 4 MB per chunk
+let _streamWorker = null;
+
+// ─── handleFileSelect — entry point ───────────────────────────────────────
 function handleFileSelect(file) {
   if (STATE.isLoading) return;
   STATE.isLoading = true;
 
-  showLoadingUI(file.name);
-  const titleEl = document.getElementById('upload-loading-title');
-  if (titleEl) titleEl.textContent = 'Uploading Log File…';
+  let worker = null;
+  try { worker = new Worker('log-worker.js'); } catch (e) {
+    console.warn('[LogRadar] Web Worker unavailable, using legacy path:', e.message);
+  }
 
+  if (worker) _useStreamingPath(file, worker);
+  else _useLegacyPath(file);
+}
+
+// ─── Streaming path ────────────────────────────────────────────────────────
+function _useStreamingPath(file, worker) {
+  _streamWorker = worker;
+  const filename   = file.name;
+  const totalSize  = file.size;
+  const totalChunks = Math.ceil(totalSize / STREAM_CHUNK_BYTES);
+
+  // Full state reset
+  STATE.currentFile = filename;
+  STATE.selectedRow = null;
+  STATE.analysis    = null;
+  STATE.parsed      = [];
+  STATE.filtered    = [];
+  STATE.rawLines    = [];
+  STATE.stream = {
+    apis: [], exceptions: [], sqlIssues: [], warnings: [],
+    logCounts: { FATAL:0, ERROR:0, WARN:0, INFO:0, DEBUG:0, TRACE:0 },
+    totalLines: 0, apiCount: 0, errorCount: 0, warnCount: 0, sqlCount: 0,
+    logType: 'Generic', chunksDone: 0, totalChunks,
+  };
+
+  worker.postMessage({ type: 'RESET' });
+
+  const fnEl = document.getElementById('topbar-filename');
+  if (fnEl) fnEl.textContent = filename;
+  const sfnEl = document.getElementById('sidebar-file-name');
+  if (sfnEl) sfnEl.textContent = filename;
+
+  STATE.activeLevels = new Set(['FATAL','ERROR','WARN','INFO','DEBUG']);
+  document.querySelectorAll('.level-checkbox').forEach(cb => {
+    cb.checked = true;
+    cb.closest('.level-pill')?.classList.remove('inactive');
+  });
+
+  const searchInput = document.getElementById('search-input');
+  if (searchInput) searchInput.value = '';
+
+  _showStreamUI(filename, totalChunks, totalSize);
+
+  worker.onmessage = (ev) => {
+    const { type: mtype, chunkIndex, totalChunks: tc, isLast, stats, newApis, result } = ev.data;
+
+    if (mtype === 'CHUNK_RESULT') {
+      Object.assign(STATE.stream, {
+        totalLines: stats.totalLines, logCounts: stats.logCounts,
+        apiCount: stats.apiCount, errorCount: stats.errorCount,
+        warnCount: stats.warnCount, sqlCount: stats.sqlCount,
+        logType: stats.logType, chunksDone: chunkIndex + 1, totalChunks: tc,
+      });
+      _updateStreamStats(stats, chunkIndex, tc);
+
+      // Progressive API Tracker update
+      if (newApis && newApis.length) {
+        STATE.stream.apis = newApis;
+        if (typeof renderApiTracker === 'function') renderApiTracker(STATE.stream.apis);
+        _updateStreamBadge('api-tracker-badge', stats.apiCount);
+      }
+      if (stats.errorCount > 0) {
+        _updateStreamBadge('card-critical-count', stats.errorCount);
+      }
+    }
+
+    if (mtype === 'COMPLETE') {
+      _onStreamComplete(result, filename, worker);
+    }
+  };
+
+  worker.onerror = (err) => {
+    console.error('[LogRadar] Worker error:', err);
+    STATE.isLoading = false;
+    hideLoadingUI();
+  };
+
+  _readChunks(file, worker, totalChunks);
+}
+
+async function _readChunks(file, worker, totalChunks) {
+  const totalSize = file.size;
+  let offset = 0;
+  let chunkIndex = 0;
+  while (offset < totalSize) {
+    const end   = Math.min(offset + STREAM_CHUNK_BYTES, totalSize);
+    const isLast = end >= totalSize;
+    const slice  = file.slice(offset, end);
+    const text   = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = e => res(e.target.result);
+      r.onerror = rej;
+      r.readAsText(slice);
+    });
+    worker.postMessage({ type: 'CHUNK', text, chunkIndex, totalChunks, isLast });
+    const pct = Math.round((end / totalSize) * 95);
+    const fill = document.getElementById('upload-progress-fill');
+    if (fill) fill.style.width = pct + '%';
+    const cardFill = document.getElementById('upload-card-progress-fill');
+    if (cardFill) cardFill.style.width = pct + '%';
+    offset = end;
+    chunkIndex++;
+    await new Promise(r => setTimeout(r, 0)); // yield to UI thread
+  }
+}
+
+function _onStreamComplete(result, filename, worker) {
+  // Map worker result to STATE.analysis shape (so all existing renderers work)
+  STATE.analysis = {
+    errors:      result.exceptions,
+    warnings:    result.warnings,
+    apis:        result.apis,
+    sqls:        result.sqlIssues,
+    vars:        {},
+    module:      result.module || 'General',
+    groups:      _groupErrorsFromResult(result.exceptions),
+    users:       result.users || [],
+    screen:      result.screen,
+    transaction: result.transaction,
+    score:       result.healthScore,
+    depChain:    [],
+    flow:        [],
+    execSummary: _buildStreamExecSummary(result),
+    logType:     result.logType,
+    blankApis:   result.blankApis || [],
+    loggerStats: { counts: result.logCounts, gaps: result.loggerGaps || [] },
+    totalLines:  result.totalLines,
+    rawLineCount: result.totalLines,
+  };
+
+  STATE.parsed   = result.exceptions.map(e => ({ id: e.id, timestamp: e.timestamp, thread: e.thread, level: e.level, source: e.source, message: e.message, isException: true }));
+  STATE.filtered = [...STATE.parsed];
+
+  const ttEl = document.getElementById('topbar-title');
+  if (ttEl) ttEl.textContent = 'Root Cause Analysis';
+
+  renderDashboard(STATE.analysis);
+  applyFilters();
+  renderTimeline(result.exceptions);
+  renderApiTracker(result.apis);
+  runScreenDebuggerAnalysis();
+
+  const fill = document.getElementById('upload-progress-fill');
+  if (fill) fill.style.width = '100%';
+
+  hideLoadingUI();
+  switchView('dashboard');
+  STATE.isLoading = false;
+  if (worker) { worker.terminate(); _streamWorker = null; }
+  console.log(`[LogRadar Streaming] ${result.totalLines} lines | ${result.apis.length} APIs | ${result.exceptions.length} errors`);
+}
+
+function _groupErrorsFromResult(exceptions) {
+  const map = {};
+  (exceptions || []).forEach(e => {
+    const key = e.message.split('\n')[0].trim().substring(0, 80);
+    if (!map[key]) map[key] = { key, count: 0, errType: e.level, firstEntry: e };
+    map[key].count++;
+  });
+  return Object.values(map).sort((a, b) => b.count - a.count);
+}
+
+function _buildStreamExecSummary(result) {
+  let dur = 'Unknown';
+  try {
+    if (result.firstTimestamp && result.lastTimestamp) {
+      const ms = new Date(result.lastTimestamp.replace(' ','T')) - new Date(result.firstTimestamp.replace(' ','T'));
+      dur = Math.round(ms / 1000) + 's';
+    }
+  } catch(e) {}
+  return {
+    logType: result.logType,
+    duration: dur,
+    totalLines: result.totalLines,
+    healthScore: result.healthScore,
+    apiCount: (result.apis || []).length,
+    failedApis: (result.apis || []).filter(a => a.status >= 400).length,
+    slowApis: (result.apis || []).filter(a => a.ms > 2000 && a.status < 400).length,
+    blankApis: (result.blankApis || []).length,
+    errorCount: (result.exceptions || []).length,
+    warnCount: (result.warnings || []).length,
+    sqlCount: (result.sqlIssues || []).length,
+    confidence: result.totalLines > 500 ? 'HIGH' : result.totalLines > 50 ? 'MEDIUM' : 'LOW',
+    recommendations: [],
+  };
+}
+
+// ─── Streaming progress UI helpers ────────────────────────────────────────
+function _showStreamUI(filename, totalChunks, totalSize) {
+  const titleEl = document.getElementById('upload-loading-title');
+  if (titleEl) titleEl.textContent = 'Streaming Analysis…';
+  const fnEl = document.getElementById('upload-loading-filename');
+  if (fnEl) fnEl.textContent = filename;
+
+  const card = document.getElementById('upload-loading-card');
+  if (card) card.style.display = 'flex';
+  const bar = document.getElementById('upload-progress-bar');
+  if (bar) { bar.style.display = 'block'; bar.classList.add('active'); }
+  const fill = document.getElementById('upload-progress-fill');
+  if (fill) fill.style.width = '0%';
+
+  const stepsEl = document.getElementById('upload-loading-steps');
+  if (stepsEl) stepsEl.style.display = 'none';
+
+  let statsEl = document.getElementById('stream-stats-panel');
+  if (statsEl) statsEl.remove(); // reset
+  statsEl = document.createElement('div');
+  statsEl.id = 'stream-stats-panel';
+  statsEl.className = 'stream-stats-panel';
+  const mb = (totalSize / 1024 / 1024).toFixed(1);
+  statsEl.innerHTML = `
+    <div class="stream-stat"><span class="ss-val" id="ss-chunks">0/${totalChunks}</span><span class="ss-lbl">Chunks</span></div>
+    <div class="stream-stat"><span class="ss-val" id="ss-lines">0</span><span class="ss-lbl">Lines Read</span></div>
+    <div class="stream-stat ss-highlight"><span class="ss-val" id="ss-apis">0</span><span class="ss-lbl">APIs Found</span></div>
+    <div class="stream-stat ss-error"><span class="ss-val" id="ss-errors">0</span><span class="ss-lbl">Errors</span></div>
+    <div class="stream-stat ss-warn"><span class="ss-val" id="ss-warns">0</span><span class="ss-lbl">Warnings</span></div>
+    <div class="stream-stat"><span class="ss-val" id="ss-sql">0</span><span class="ss-lbl">SQL Issues</span></div>
+  `;
+  if (card) card.appendChild(statsEl);
+
+  const largeWarn = document.getElementById('upload-large-warning');
+  if (largeWarn) {
+    largeWarn.style.display = totalSize > 5 * 1024 * 1024 ? 'block' : 'none';
+    largeWarn.textContent = `Streaming ${mb} MB in ${totalChunks} chunk${totalChunks !== 1 ? 's' : ''} — browser stays responsive`;
+  }
+}
+
+function _updateStreamStats(stats, chunkIndex, totalChunks) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('ss-chunks', `${chunkIndex + 1}/${totalChunks}`);
+  set('ss-lines',  stats.totalLines.toLocaleString());
+  set('ss-apis',   stats.apiCount);
+  set('ss-errors', stats.errorCount);
+  set('ss-warns',  stats.warnCount);
+  set('ss-sql',    stats.sqlCount);
+  if (stats.logType && stats.logType !== 'Generic') {
+    const t = document.getElementById('upload-loading-title');
+    if (t && !t.textContent.includes(stats.logType)) t.textContent = `Streaming ${stats.logType} Log…`;
+  }
+}
+
+function _updateStreamBadge(id, count) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = count; if (count > 0) el.style.display = ''; }
+}
+
+// ─── Legacy path (fallback when Worker unavailable) ────────────────────────
+function _useLegacyPath(file) {
+  const titleEl = document.getElementById('upload-loading-title');
+  showLoadingUI(file.name);
+  if (titleEl) titleEl.textContent = 'Uploading Log File…';
   const reader = new FileReader();
   reader.onprogress = ev => {
     if (ev.lengthComputable) {
@@ -4730,22 +5035,16 @@ function handleFileSelect(file) {
       if (cardFill) cardFill.style.width = pct + '%';
     }
   };
-
   reader.onload = ev => {
     if (titleEl) titleEl.textContent = 'Analysing Log File…';
-    // Small delay so the user sees 100% upload before analysis steps start
-    setTimeout(() => {
-      loadLog(ev.target.result, file.name, true);
-    }, 150);
+    setTimeout(() => { loadLog(ev.target.result, file.name, true); }, 150);
   };
-
   reader.onerror = () => {
     console.error('[LogRadar] FileReader error reading:', file.name);
     if (titleEl) titleEl.textContent = 'Error reading file';
     STATE.isLoading = false;
     hideLoadingUI();
   };
-
   reader.readAsText(file);
 }
 
