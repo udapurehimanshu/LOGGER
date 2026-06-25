@@ -3567,31 +3567,50 @@ window.filterDbgFields = function() {
   });
 };
 
+// Stores the current script context so openScriptInEditor can access it
+window._scriptModalCtx = { code: '', fieldName: '', eventName: '' };
+
 window.showScriptModal = function(fieldName, propKey) {
   const screenDef = STATE.screenDefinition;
   if (!screenDef || !screenDef.fullFieldsList) return;
-  
+
   const fieldObj = screenDef.fullFieldsList.find(f => (f.id || f.name) === fieldName);
   if (!fieldObj) return;
-  
+
   const scriptCode = fieldObj[propKey] || '';
   const title = PROPERTY_MAP[propKey] || propKey;
-  
-  const modal = document.getElementById('screen-script-modal');
+
+  // Store context for openScriptInEditor
+  window._scriptModalCtx = { code: scriptCode, fieldName, eventName: title };
+
+  const modal   = document.getElementById('screen-script-modal');
   const titleEl = document.getElementById('script-modal-title');
-  const codeEl = document.getElementById('script-modal-code');
+  const codeEl  = document.getElementById('script-modal-code');
   const copyBtn = document.getElementById('copy-script-btn');
-  
+  const statusEl= document.getElementById('open-editor-status');
+  const sel     = document.getElementById('editor-choice-select');
+
   if (modal && titleEl && codeEl) {
-     titleEl.textContent = `${fieldName} — ${title} Script`;
-     codeEl.textContent = scriptCode;
-     modal.style.display = 'flex';
-     if (copyBtn) {
-        copyBtn.textContent = 'Copy';
-        copyBtn.style.background = 'rgba(255,255,255,0.05)';
-        copyBtn.style.borderColor = 'rgba(255,255,255,0.1)';
-        copyBtn.style.color = '#E2E8F0';
-     }
+    titleEl.textContent = `${fieldName} — ${title} Script`;
+    codeEl.textContent  = scriptCode;
+    modal.style.display = 'flex';
+
+    // Reset copy button
+    if (copyBtn) {
+      copyBtn.textContent        = 'Copy';
+      copyBtn.style.background   = 'rgba(255,255,255,0.05)';
+      copyBtn.style.borderColor  = 'rgba(255,255,255,0.1)';
+      copyBtn.style.color        = '#E2E8F0';
+    }
+
+    // Hide status label
+    if (statusEl) statusEl.style.display = 'none';
+
+    // Restore last-used editor preference from localStorage
+    if (sel) {
+      const saved = localStorage.getItem('logradar_editor') || 'notepad';
+      sel.value = saved;
+    }
   }
 };
 
@@ -3616,6 +3635,72 @@ window.copyModalScript = function() {
      });
   }
 };
+
+/* ---------- Open in Editor ------------------------------------------------- */
+window.openScriptInEditor = async function() {
+  const { code, fieldName, eventName } = window._scriptModalCtx || {};
+  if (!code) {
+    alert('No script code to open.');
+    return;
+  }
+
+  const sel    = document.getElementById('editor-choice-select');
+  const editor = sel ? sel.value : 'notepad';
+
+  // Persist preference
+  localStorage.setItem('logradar_editor', editor);
+
+  const btn      = document.getElementById('open-in-editor-btn');
+  const statusEl = document.getElementById('open-editor-status');
+
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Opening…'; }
+  if (statusEl) { statusEl.style.display = 'none'; }
+
+  try {
+    const resp = await fetch('http://localhost:9090/api/open-in-editor', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ code, fieldName, eventName, editor }),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      if (statusEl) {
+        statusEl.textContent  = `✔ Opened in ${data.editor || editor}`;
+        statusEl.style.color  = '#10B981';
+        statusEl.style.display= 'inline';
+      }
+    } else {
+      throw new Error(`Server returned ${resp.status}`);
+    }
+  } catch (err) {
+    // Server not running — fall back to download
+    console.warn('Local server unreachable, falling back to download:', err.message);
+    _downloadScriptFallback(code, fieldName, eventName);
+    if (statusEl) {
+      statusEl.textContent  = '⬇ Server offline — file downloaded instead';
+      statusEl.style.color  = '#F59E0B';
+      statusEl.style.display= 'inline';
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Open'; }
+  }
+};
+
+/** Fallback: trigger a browser download so the user can open the file manually */
+function _downloadScriptFallback(code, fieldName, eventName) {
+  const sanitize = s => String(s || 'script').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 60);
+  const fname    = `LogRadar_${sanitize(fieldName)}_${sanitize(eventName)}.js`;
+  const blob     = new Blob([code], { type: 'text/plain' });
+  const url      = URL.createObjectURL(blob);
+  const a        = document.createElement('a');
+  a.href         = url;
+  a.download     = fname;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // Helper to convert hex to rgb for rgba transparency
 function hexToRgb(hex) {
