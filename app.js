@@ -337,6 +337,258 @@ function buildAnalysisText(parsed) {
   return text;
 }
 
+function detectLogType(text) {
+  if (!text) return 'Generic';
+  const lower = text.toLowerCase();
+  if (lower.includes('flexiruntime') || lower.includes('intellinum') || lower.includes('useractionlogger')) {
+    return 'Flexi Runtime';
+  }
+  if (lower.includes(':: spring boot ::') || lower.includes('springboot') || lower.includes('org.springframework')) {
+    return 'Spring Boot';
+  }
+  if (lower.includes('traceback (most recent call last):') || lower.includes('line, in <module>')) {
+    return 'Python';
+  }
+  if (lower.includes('node_modules') || lower.includes('node:internal') || (lower.includes('at ') && lower.includes('.js:'))) {
+    return 'NodeJS';
+  }
+  if (lower.includes('org.apache.log4j') || lower.includes('log4j') || lower.includes('apache')) {
+    return 'Apache Log4j';
+  }
+  return 'Generic';
+}
+
+function extractBlankAPIs(apis) {
+  const blankApis = [];
+  apis.forEach(api => {
+    if (api.status === 200 && api.response) {
+      const respStr = api.response.trim();
+      let isBlank = false;
+      let blankReason = '';
+      let recommendation = '';
+      
+      if (respStr === '[]' || respStr === '{}') {
+        isBlank = true;
+        blankReason = 'Empty response body';
+        recommendation = 'Check request parameters. Downstream query returned no records.';
+      } else {
+        const countM = respStr.match(/"count"\s*:\s*0\b/i) || respStr.match(/"records"\s*:\s*0\b/i);
+        const itemsM = respStr.match(/"items"\s*:\s*\[\s*\]/i) || respStr.match(/"data"\s*:\s*\[\s*\]/i);
+        
+        if (countM && itemsM) {
+          isBlank = true;
+          blankReason = 'Empty items list with count 0';
+          recommendation = 'Query executed successfully but returned zero results. Verify if the database has records matching the criteria.';
+        } else if (countM) {
+          isBlank = true;
+          blankReason = 'Response count field is 0';
+          recommendation = 'Verify query criteria. Ensure the underlying database contains active records for this entity.';
+        } else if (itemsM) {
+          isBlank = true;
+          blankReason = 'Items array is empty';
+          recommendation = 'No records matching input criteria. Check filters or input parameter bindings.';
+        }
+      }
+      
+      if (isBlank) {
+        blankApis.push({
+          name: api.name,
+          endpoint: api.endpoint || 'Unknown',
+          status: api.status,
+          ms: api.ms,
+          blankReason: blankReason,
+          recommendation: recommendation,
+          logIndex: api.logIndex
+        });
+      }
+    }
+  });
+  return blankApis;
+}
+
+function classifyApiBusinessResult(api) {
+  if (!api.status) return 'Unknown';
+  if (api.status >= 400) {
+    return `Failed (HTTP ${api.status})`;
+  }
+  if (api.response) {
+    const respStr = api.response;
+    if (respStr.includes('"success":false') || respStr.includes('"success": false') || respStr.includes('"valid":false') || respStr.includes('"valid": false')) {
+      return 'Business Validation Failure';
+    }
+    const countM = respStr.match(/"count"\s*:\s*0\b/i) || respStr.match(/"records"\s*:\s*0\b/i);
+    const itemsM = respStr.match(/"items"\s*:\s*\[\s*\]/i) || respStr.match(/"data"\s*:\s*\[\s*\]/i);
+    if (respStr.trim() === '[]' || respStr.trim() === '{}' || countM || itemsM) {
+      return 'Blank Response';
+    }
+  }
+  return 'Healthy';
+}
+
+function analyzeWarnings(parsed) {
+  const warnings = [];
+  parsed.forEach(e => {
+    if (e.level === 'WARN') {
+      let classification = 'General Warning';
+      let impact = 'Potential system degradation or non-standard behavior.';
+      let causesFutureFailure = false;
+      const msg = e.message.toLowerCase();
+      
+      if (msg.includes('config') || msg.includes('setup') || msg.includes('property') || msg.includes('env') || msg.includes('missing setting')) {
+        classification = 'Configuration Warning';
+        impact = 'Misconfigured settings may lead to fallback behaviors or minor feature failure.';
+        causesFutureFailure = false;
+      } else if (msg.includes('deprecat') || msg.includes('obsolete')) {
+        classification = 'Deprecated API';
+        impact = 'Code depends on deprecated APIs that will be removed in future versions.';
+        causesFutureFailure = true;
+      } else if (msg.includes('memory') || msg.includes('heap') || msg.includes('garbage collection') || msg.includes('gc ') || msg.includes('leak')) {
+        classification = 'Memory Warning';
+        impact = 'Elevated memory usage. High risk of OutOfMemory crashes in production.';
+        causesFutureFailure = true;
+      } else if (msg.includes('slow') || msg.includes('latency') || msg.includes('timeout') || msg.includes('duration') || msg.includes('performance')) {
+        classification = 'Performance Warning';
+        impact = 'High latency or execution times may cause bottleneck and degrade user experience.';
+        causesFutureFailure = false;
+      } else if (msg.includes('security') || msg.includes('auth') || msg.includes('unauthorized') || msg.includes('ssl') || msg.includes('permission') || msg.includes('decrypt') || msg.includes('cipher')) {
+        classification = 'Security Warning';
+        impact = 'Potential vulnerability, unauthorized access attempt, or invalid credentials.';
+        causesFutureFailure = false;
+      } else if (msg.includes('validation') || msg.includes('invalid field') || msg.includes('business') || msg.includes('rule') || msg.includes('constraint')) {
+        classification = 'Business Warning';
+        impact = 'Business validation failed (non-critical). The current action might not complete as expected.';
+        causesFutureFailure = false;
+      } else if (msg.includes('sql') || msg.includes('database') || msg.includes('query') || msg.includes('jdbc') || msg.includes('connection pool') || msg.includes('oracle') || msg.includes('ora-')) {
+        classification = 'Database Warning';
+        impact = 'Database queries or connections are slow or hitting resource limits.';
+        causesFutureFailure = true;
+      } else if (msg.includes('network') || msg.includes('http') || msg.includes('socket') || msg.includes('connect') || msg.includes('dns') || msg.includes('refused')) {
+        classification = 'Network Warning';
+        impact = 'Transient network issues detected. May result in API call failures.';
+        causesFutureFailure = false;
+      } else if (msg.includes('resource') || msg.includes('file descriptor') || msg.includes('disk') || msg.includes('io exception') || msg.includes('thread pool')) {
+        classification = 'Resource Warning';
+        impact = 'System resources (disk, files, thread pools) are running low.';
+        causesFutureFailure = true;
+      }
+      
+      warnings.push({
+        id: e.id,
+        timestamp: e.timestamp,
+        thread: e.thread,
+        source: e.source || 'Unknown',
+        message: e.message,
+        classification: classification,
+        impact: impact,
+        causesFutureFailure: causesFutureFailure
+      });
+    }
+  });
+  return warnings;
+}
+
+function analyzeLoggers(parsed, text) {
+  const counts = { TRACE: 0, DEBUG: 0, INFO: 0, WARN: 0, ERROR: 0, FATAL: 0 };
+  parsed.forEach(e => {
+    if (counts[e.level] !== undefined) {
+      counts[e.level]++;
+    }
+  });
+  
+  const gaps = [];
+  
+  // Gap 1: API started but never completed (on same thread)
+  const threadApiStates = {};
+  parsed.forEach(e => {
+    const msg = e.message;
+    const thread = e.thread;
+    
+    const startM = msg.match(/callWebService:name:(\S+)/i) || 
+                   msg.match(/Initiating API call:\s*(\S+)/i) ||
+                   msg.match(/(\S+)\.callWebService\(\)\s*started/i);
+    
+    if (startM) {
+      threadApiStates[thread] = { name: startM[1], index: e.id };
+    }
+    
+    if (threadApiStates[thread]) {
+      const hasResponse = msg.includes('Response Code') || 
+                          msg.includes('HTTP Response Code') || 
+                          msg.includes('Response Body') ||
+                          msg.includes('result{') || 
+                          msg.includes('result {') ||
+                          (msg.includes('callWebService() : ') && msg.includes('ms'));
+      if (hasResponse) {
+        delete threadApiStates[thread];
+      }
+    }
+  });
+  
+  for (const thread in threadApiStates) {
+    const state = threadApiStates[thread];
+    gaps.push({
+      type: 'Missing API Response Logger',
+      description: `API call to "${state.name}" started on thread "${thread}" (log index ${state.index}) but no response code or body was logged.`,
+      recommendation: 'Add response logger in the api client fallback block.'
+    });
+  }
+  
+  // Gap 2: DB query execution started but no completion or result count logged
+  const dbStarts = [];
+  const dbEnds = [];
+  parsed.forEach(e => {
+    const msg = e.message.toLowerCase();
+    if (msg.includes('executequery') || msg.includes('executing query') || msg.includes('select ') || msg.includes('insert ') || msg.includes('update ')) {
+      dbStarts.push(e);
+    }
+    if (msg.includes('rows fetched') || msg.includes('query complete') || msg.includes('db connection') || msg.includes('rows affected')) {
+      dbEnds.push(e);
+    }
+  });
+  if (dbStarts.length > dbEnds.length + 2) {
+    gaps.push({
+      type: 'Incomplete Database Logging',
+      description: 'Multiple queries started without logged execution times or row counts.',
+      recommendation: 'Enable SQL performance logging in JDBC/connection pool config.'
+    });
+  }
+  
+  // Gap 3: Missing INFO loggers in long logic blocks (e.g. no logs for > 8 seconds on same thread)
+  const threadLastTimes = {};
+  parsed.forEach(e => {
+    if (e.timestamp && e.thread) {
+      const timeVal = new Date(e.timestamp.replace(' ', 'T')).getTime();
+      if (!isNaN(timeVal)) {
+        if (threadLastTimes[e.thread]) {
+          const diff = timeVal - threadLastTimes[e.thread];
+          if (diff > 8000) {
+            gaps.push({
+              type: 'Execution Telemetry Gap',
+              description: `Thread "${e.thread}" had no log activity for ${Math.round(diff/1000)}s between log index ${e.id - 1} and ${e.id}.`,
+              recommendation: 'Inject debug/trace log statements in loops or long running methods.'
+            });
+          }
+        }
+        threadLastTimes[e.thread] = timeVal;
+      }
+    }
+  });
+  
+  const uniqueGaps = [];
+  const seenTypes = new Set();
+  gaps.forEach(g => {
+    if (!seenTypes.has(g.description)) {
+      seenTypes.add(g.description);
+      uniqueGaps.push(g);
+    }
+  });
+  
+  return {
+    counts,
+    gaps: uniqueGaps.slice(0, 5)
+  };
+}
+
 function analyzeAll(parsed, rawLines) {
   // Build a capped text blob for regex-heavy operations
   const text     = buildAnalysisText(parsed);
@@ -344,10 +596,15 @@ function analyzeAll(parsed, rawLines) {
 
   // --- Error counts (work on full parsed array)
   const errors   = parsed.filter(e => ['ERROR','FATAL'].includes(e.level));
-  const warnings = parsed.filter(e => e.level === 'WARN');
+  
+  // --- New features ---
+  const logType = detectLogType(text);
+  const warnings = analyzeWarnings(parsed);
+  const loggerStats = analyzeLoggers(parsed, text);
 
   // --- API / SQL / variable extraction (work on capped text — fast)
   const apis     = extractAPIs(text);
+  const blankApis = extractBlankAPIs(apis);
   const sqls     = extractSQL(text);
   const vars     = extractVariables(text);
 
@@ -363,7 +620,7 @@ function analyzeAll(parsed, rawLines) {
   const transaction = extractTransaction(text);
 
   // --- Health Score
-  const score    = calcHealthScore({ errors, warnings, parsed, apis, sqls });
+  const score    = calcHealthScore({ errors, warnings, parsed, apis, sqls, blankApis, loggerStats });
 
   // --- Dependency chain
   const depChain = buildDepChain(parsed, apis, sqls);
@@ -372,10 +629,11 @@ function analyzeAll(parsed, rawLines) {
   const flow     = buildWMSFlow(text, module);
 
   // --- Exec Summary
-  const execSummary = buildExecSummary({ errors, apis, sqls, module, users, screen, transaction, score, vars });
+  const execSummary = buildExecSummary({ errors, apis, sqls, module, users, screen, transaction, score, vars, logType, blankApis, parsed });
 
   return {
     errors, warnings, apis, sqls, vars, module, groups, users, screen, transaction, score, depChain, flow, execSummary,
+    logType, blankApis, loggerStats,
     totalLines: parsed.length,
     rawLineCount: rawLines.length,
   };
@@ -514,6 +772,54 @@ function extractAPIs(text) {
         api.endpoint = hrefM[1];
       }
     }
+    
+    // -- EXTRACT RECORD COUNT --
+    api.recordCount = null;
+    if (api.response) {
+      const countMatch = api.response.match(/"count"\s*:\s*(\d+)/i) || api.response.match(/"records"\s*:\s*(\d+)/i);
+      if (countMatch) {
+        api.recordCount = parseInt(countMatch[1]);
+      } else {
+        const itemsMatch = api.response.match(/"items"\s*:\s*\[([^\]]*)\]/i) || api.response.match(/"data"\s*:\s*\[([^\]]*)\]/i);
+        if (itemsMatch) {
+          const itemsStr = itemsMatch[1].trim();
+          if (!itemsStr) {
+            api.recordCount = 0;
+          } else {
+            const objectCount = (itemsStr.match(/\{/g) || []).length;
+            api.recordCount = objectCount > 0 ? objectCount : (itemsStr.split(',').length);
+          }
+        }
+      }
+    }
+    
+    // -- EXTRACT RETRY COUNT --
+    api.retryCount = 0;
+    const sameThreadApis = uniqueApis.filter(a => a.name === api.name && a.thread === api.thread);
+    const indexOnThread = sameThreadApis.indexOf(api);
+    api.retryCount = indexOnThread;
+    
+    if (STATE.parsed && STATE.parsed.length) {
+      const threadLogs = STATE.parsed.filter(e => e.thread === api.thread);
+      const logIdxInThread = threadLogs.findIndex(e => e.id === api.logIndex);
+      if (logIdxInThread !== -1) {
+        const start = Math.max(0, logIdxInThread - 5);
+        const end = Math.min(threadLogs.length, logIdxInThread + 6);
+        for (let i = start; i < end; i++) {
+          if (/retry|retrying|attempt/i.test(threadLogs[i].message)) {
+            const attemptMatch = threadLogs[i].message.match(/attempt\s*#?\s*(\d+)/i) || threadLogs[i].message.match(/retry\s*#?\s*(\d+)/i);
+            if (attemptMatch) {
+              api.retryCount = Math.max(api.retryCount, parseInt(attemptMatch[1]) - 1);
+            } else {
+              api.retryCount = Math.max(api.retryCount, 1);
+            }
+          }
+        }
+      }
+    }
+    
+    // -- CLASSIFY BUSINESS RESULT --
+    api.businessResult = classifyApiBusinessResult(api);
   });
 
   return uniqueApis;
@@ -631,16 +937,29 @@ function extractTransaction(text) {
   return m ? m[1].trim() : null;
 }
 
-function calcHealthScore({ errors, warnings, parsed, apis, sqls }) {
+function calcHealthScore({ errors, warnings, parsed, apis, sqls, blankApis, loggerStats }) {
   let score = 100;
   const errPct = parsed.length ? (errors.length / parsed.length) : 0;
   score -= Math.min(40, Math.round(errPct * 200));
-  score -= Math.min(10, warnings.length * 2);
+  
+  const warnCount = warnings ? (Array.isArray(warnings) ? warnings.length : warnings) : 0;
+  score -= Math.min(10, warnCount * 2);
+  
   const failedApis = apis.filter(a => a.status && (a.status >= 400 || a.ms > 5000));
   score -= Math.min(25, failedApis.length * 12);
+  
   const slowApis = apis.filter(a => a.ms > 2000 && (!a.status || a.status < 400));
   score -= Math.min(15, slowApis.length * 8);
+  
   score -= Math.min(20, sqls.filter(s => s.code && s.code !== 'JSON_KEY_MISSING').length * 10);
+  
+  if (blankApis && blankApis.length) {
+    score -= Math.min(25, blankApis.length * 5);
+  }
+  if (loggerStats && loggerStats.gaps && loggerStats.gaps.length) {
+    score -= Math.min(15, loggerStats.gaps.length * 3);
+  }
+  
   return Math.max(0, score);
 }
 
@@ -688,29 +1007,83 @@ function buildWMSFlow(text, module) {
   });
 }
 
-function buildExecSummary({ errors, apis, sqls, module, users, screen, transaction, score, vars }) {
-  if (!errors.length && !apis.length && !sqls.length) return null;
-  const mainError = errors[0];
-  let issue = 'System error detected in log.';
-  let rootCause = 'Investigate the error entries in the log.';
-  let fix = 'Review the diagnostic drawer for each error.';
-  let impact = 'Process interrupted.';
+function buildExecSummary({ errors, apis, sqls, module, users, screen, transaction, score, vars, logType, blankApis, parsed }) {
+  let durationStr = 'Unknown';
+  if (parsed && parsed.length) {
+    const firstTs = parsed[0].timestamp;
+    const lastTs = parsed[parsed.length - 1].timestamp;
+    if (firstTs && lastTs) {
+      const first = new Date(firstTs.replace(' ', 'T')).getTime();
+      const last = new Date(lastTs.replace(' ', 'T')).getTime();
+      if (!isNaN(first) && !isNaN(last)) {
+        const diffMs = last - first;
+        const diffSec = Math.floor(diffMs / 1000);
+        if (diffSec < 60) {
+          durationStr = `${diffSec} seconds`;
+        } else {
+          const min = Math.floor(diffSec / 60);
+          const sec = diffSec % 60;
+          durationStr = `${min}m ${sec}s (${diffMs}ms)`;
+        }
+      } else {
+        durationStr = `${firstTs} to ${lastTs}`;
+      }
+    }
+  }
 
-  if (mainError) {
+  const totalApis = apis ? apis.length : 0;
+  const failedApisCount = apis ? apis.filter(a => a.status >= 400).length : 0;
+  const blankApisCount = blankApis ? blankApis.length : 0;
+  const healthyApisCount = totalApis - failedApisCount - blankApisCount;
+
+  let issue = 'System healthy — no critical errors detected.';
+  let rootCause = 'N/A';
+  let fix = 'No immediate actions required.';
+  let impact = 'Normal operation.';
+  let confidenceScore = 100;
+
+  if (errors && errors.length) {
+    const mainError = errors[0];
     const rc = analyzeRow(mainError, [], {});
     issue = transaction ? `${transaction} failed in ${module} module.` : `${module} module encountered a critical error.`;
     rootCause = rc.rootCause || 'See diagnostic drawer.';
     fix = rc.immediatefix || 'See fix recommendations.';
-    impact = users.length ? `Affected user count: ${users.length}` : 'Transaction was aborted.';
+    impact = users && users.length ? `Affected user count: ${users.length}` : 'Transaction was aborted.';
+    confidenceScore = 75;
+  } else if (blankApisCount > 0) {
+    issue = `Silent failures detected: ${blankApisCount} API responses returned empty results.`;
+    rootCause = 'API queries returned 200 OK but contained empty count, items, or records arrays (blank API responses).';
+    fix = 'Verify database records and check if request filters are too restrictive.';
+    impact = 'Users may experience empty lists or missing information on screen without any visible errors.';
+    confidenceScore = 90;
+  } else if (sqls && sqls.length) {
+    issue = 'Database anomalies detected.';
+    rootCause = 'Non-critical database queries failed or returned warning codes.';
+    fix = 'Inspect the Database Analysis section for detailed ORA errors.';
+    impact = 'Potential data loading delays.';
+    confidenceScore = 85;
   }
 
-  return `<strong>Issue:</strong> ${issue}<br>
-<strong>Affected Layer:</strong> ${module}${screen ? ` / Context: ${screen}` : ''}<br>
-<strong>Root Cause:</strong> ${rootCause}<br>
-<strong>Affected Identities:</strong> ${users.length ? `${users.length} unique accounts` : 'Not identified'}<br>
-<strong>Impact:</strong> ${impact}<br>
-<strong>Recommended Fix:</strong> ${fix}<br>
-<strong>Log Health Score:</strong> ${score}/100`;
+  let confidenceLabel = 'HIGH';
+  let confidenceColor = '#16A34A';
+  if (confidenceScore < 80) {
+    confidenceLabel = 'MEDIUM';
+    confidenceColor = '#F59E0B';
+  }
+
+  return `<div class="confidence-band" style="border-left: 4px solid ${confidenceColor}; margin-bottom: 12px; padding-left: 8px;">
+    <strong>Log Investigation Confidence:</strong> <span style="color:${confidenceColor}; font-weight:700;">${confidenceScore}% (${confidenceLabel})</span>
+  </div>
+  <strong>Issue:</strong> ${issue}<br>
+  <strong>Log Type:</strong> <span class="badge" style="background:#E0F2FE; color:#0369A1; font-weight:600; padding:2px 6px; border-radius:4px; font-size:11px;">${logType || 'Generic'}</span><br>
+  <strong>Execution Duration:</strong> ${durationStr}<br>
+  <strong>API Execution Summary:</strong> Total: ${totalApis} | Healthy: <span style="color:#16A34A; font-weight:600;">${healthyApisCount}</span> | Failed: <span style="color:#DC2626; font-weight:600;">${failedApisCount}</span> | Blank: <span style="color:#F59E0B; font-weight:600;">${blankApisCount}</span><br>
+  <strong>Affected Layer:</strong> ${module}${screen ? ` / Context: ${screen}` : ''}<br>
+  <strong>Root Cause:</strong> ${rootCause}<br>
+  <strong>Affected Identities:</strong> ${users && users.length ? `${users.length} unique accounts` : 'Not identified'}<br>
+  <strong>Impact:</strong> ${impact}<br>
+  <strong>Recommended Fix:</strong> ${fix}<br>
+  <strong>Log Health Score:</strong> ${score}/100`;
 }
 
 // ─── Error Type Classifier ─────────────────────────────────────────────────────
@@ -2076,7 +2449,7 @@ function renderDashboard(a) {
   // Stat Cards
   $('stat-critical').textContent = a.errors.length;
   $('stat-critical-sub').textContent = a.errors.filter(e => e.level === 'FATAL').length + ' FATAL';
-  $('stat-warnings').textContent = a.warnings.length;
+  $('stat-warnings').textContent = a.warnings ? (Array.isArray(a.warnings) ? a.warnings.length : a.warnings) : 0;
   $('stat-warnings-sub').textContent = 'Needs attention';
   $('stat-slowapis').textContent = a.apis.filter(x => x.ms > 2000).length;
   $('stat-sqlfail').textContent = a.sqls.filter(s => s.code && s.code !== 'JSON_KEY_MISSING').length;
@@ -2105,6 +2478,18 @@ function renderDashboard(a) {
   const slowest = a.apis.length ? Math.max(...a.apis.map(x => x.ms)) : 0;
   $('hm-slowapi').textContent = slowest ? slowest + 'ms' : 'None';
   $('hm-slowapi').className = 'health-meta-val' + (slowest > 5000 ? ' bad' : slowest > 2000 ? ' warn' : '');
+
+  // Log Type badge in header
+  const logTypeBadge = $('log-type-badge');
+  if (logTypeBadge) {
+    if (a.logType) {
+      logTypeBadge.textContent = a.logType;
+      logTypeBadge.className = 'log-type-badge ' + a.logType.toLowerCase().replace(/\s+/g, '-');
+      logTypeBadge.style.display = 'inline-block';
+    } else {
+      logTypeBadge.style.display = 'none';
+    }
+  }
 
   // Performance List
   const perfEl = $('perf-list');
@@ -2228,6 +2613,183 @@ function renderDashboard(a) {
     badge.textContent = a.errors.length;
     badge.style.display = '';
   }
+  
+  // Render our new dashboard cards
+  renderBlankApiReport(a.blankApis);
+  renderWarningAnalysis(a.warnings);
+  renderLoggerAnalysis(a.loggerStats);
+}
+
+function renderBlankApiReport(blankApis) {
+  const container = document.getElementById('blank-api-report-body');
+  if (!container) return;
+  
+  if (!blankApis || !blankApis.length) {
+    container.innerHTML = `
+      <div class="no-data-state" style="padding:20px;">
+        <p>No blank API responses (silent failures) detected in log.</p>
+      </div>`;
+    return;
+  }
+  
+  container.innerHTML = `
+    <table class="blank-api-table" style="width:100%; border-collapse:collapse; font-size:13px; text-align:left;">
+      <thead>
+        <tr style="border-bottom:2px solid var(--border); color:var(--text-light); font-weight:600;">
+          <th style="padding:8px 12px;">API Name</th>
+          <th style="padding:8px 12px;">HTTP Status</th>
+          <th style="padding:8px 12px;">Response Time</th>
+          <th style="padding:8px 12px;">Blank Reason</th>
+          <th style="padding:8px 12px;">Recommendation</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${blankApis.map(api => `
+          <tr class="clickable-blank-api-row" data-name="${escHtml(api.name)}" style="border-bottom:1px solid var(--border); cursor:pointer;" onmouseover="this.style.backgroundColor='var(--bg-row-hover)'" onmouseout="this.style.backgroundColor='transparent'">
+            <td style="padding:10px 12px; font-weight:600; color:var(--primary);">${escHtml(api.name)}</td>
+            <td style="padding:10px 12px;"><span class="badge success" style="font-size:11px;">HTTP ${api.status}</span></td>
+            <td style="padding:10px 12px; font-weight:500;">${api.ms}ms</td>
+            <td style="padding:10px 12px; color:#D97706; font-weight:500;">⚠ ${escHtml(api.blankReason)}</td>
+            <td style="padding:10px 12px; color:var(--text-normal); font-size:12px;">${escHtml(api.recommendation)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`;
+    
+  container.querySelectorAll('.clickable-blank-api-row').forEach(row => {
+    row.addEventListener('click', () => {
+      selectApiByName(row.dataset.name);
+    });
+  });
+}
+
+function renderWarningAnalysis(warnings) {
+  const container = document.getElementById('warning-analysis-body');
+  if (!container) return;
+  
+  if (!warnings || !warnings.length) {
+    container.innerHTML = `
+      <div class="no-data-state" style="padding:20px;">
+        <p>No warnings detected in log.</p>
+      </div>`;
+    return;
+  }
+  
+  const grouped = {};
+  warnings.forEach(w => {
+    if (!grouped[w.classification]) {
+      grouped[w.classification] = { count: 0, list: [], impact: w.impact, causesFutureFailure: w.causesFutureFailure };
+    }
+    grouped[w.classification].count++;
+    grouped[w.classification].list.push(w);
+  });
+  
+  container.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      ${Object.keys(grouped).map(cls => {
+        const info = grouped[cls];
+        const failBadge = info.causesFutureFailure 
+          ? `<span class="badge error" style="font-size:9.5px; font-weight:600; margin-left:6px;">High Risk of Failure</span>` 
+          : `<span class="badge warn" style="font-size:9.5px; font-weight:600; margin-left:6px;">Low Risk</span>`;
+        return `
+          <div class="warning-card" style="padding:12px 16px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg-sub); position:relative;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <span style="font-weight:700; font-size:13.5px; color:#B45309;">${cls} (${info.count})</span>
+              ${failBadge}
+            </div>
+            <div style="font-size:12px; color:var(--text-normal); line-height:1.5; margin-bottom:8px;">
+              <strong>Impact:</strong> ${escHtml(info.impact)}
+            </div>
+            <div style="max-height:80px; overflow-y:auto; font-family:'Fira Code', monospace; font-size:11.5px; color:var(--text-light); background:var(--bg); padding:6px 10px; border-radius:4px; border:1px solid var(--border);">
+              ${info.list.map(w => `
+                <div class="clickable-warn-row" data-id="${w.id}" style="cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:4px;" onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color='inherit'">
+                  [${escHtml(w.timestamp || 'No Timestamp')}] ${escHtml(w.message)}
+                </div>
+              `).join('')}
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`;
+    
+  container.querySelectorAll('.clickable-warn-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const id = parseInt(row.dataset.id);
+      showAndHighlightLog(id);
+    });
+  });
+}
+
+function renderLoggerAnalysis(loggerStats) {
+  const container = document.getElementById('logger-analysis-body');
+  if (!container) return;
+  
+  if (!loggerStats || !loggerStats.counts) {
+    container.innerHTML = `
+      <div class="no-data-state" style="padding:20px;">
+        <p>No log statistics available.</p>
+      </div>`;
+    return;
+  }
+  
+  const counts = loggerStats.counts;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  
+  const colors = {
+    FATAL: '#7F1D1D',
+    ERROR: '#DC2626',
+    WARN: '#F59E0B',
+    INFO: '#3B82F6',
+    DEBUG: '#10B981',
+    TRACE: '#6B7280'
+  };
+  
+  let barHtml = '<div style="display:flex; height:12px; border-radius:6px; overflow:hidden; margin-bottom:16px; background:#F3F4F6;">';
+  for (const lvl in counts) {
+    if (counts[lvl] > 0) {
+      const pct = (counts[lvl] / total) * 100;
+      barHtml += `<div style="width:${pct}%; background:${colors[lvl] || '#E5E7EB'};" title="${lvl}: ${counts[lvl]} entries (${Math.round(pct)}%)"></div>`;
+    }
+  }
+  barHtml += '</div>';
+  
+  let legendHtml = '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-bottom:16px;">';
+  for (const lvl in counts) {
+    const color = colors[lvl] || '#9CA3AF';
+    legendHtml += `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 10px; background:var(--bg); border:1px solid var(--border); border-radius:6px;">
+        <div style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--text-dark);">
+          <span style="width:8px; height:8px; border-radius:50%; background:${color}; display:inline-block;"></span>
+          ${lvl}
+        </div>
+        <span style="font-family:'Fira Code', monospace; font-size:12px; font-weight:700; color:var(--text-normal);">${counts[lvl]}</span>
+      </div>`;
+  }
+  legendHtml += '</div>';
+  
+  let gapsHtml = '';
+  if (loggerStats.gaps && loggerStats.gaps.length) {
+    gapsHtml = `
+      <div style="border-top:1px dashed var(--border); padding-top:14px;">
+        <span style="font-size:12.5px; font-weight:700; color:var(--text-dark); display:block; margin-bottom:8px;">Logger Recommendations & Telemetry Gaps</span>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${loggerStats.gaps.map(g => `
+            <div style="padding:10px 12px; border-left:3px solid #6366F1; background:#EEF2FF; border-radius:0 6px 6px 0; font-size:12px; line-height:1.5;">
+              <strong style="color:#4F46E5;">${escHtml(g.type)}:</strong> ${escHtml(g.description)}
+              <div style="font-size:11px; color:#6B7280; margin-top:4px;">
+                💡 <em>Fix Recommendation:</em> ${escHtml(g.recommendation)}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+  } else {
+    gapsHtml = `
+      <div style="border-top:1px dashed var(--border); padding-top:12px; color:#16A34A; font-size:12px; display:flex; align-items:center; gap:6px;">
+        ✓ Excellent Telemetry coverage. No logger gaps or incomplete flows detected.
+      </div>`;
+  }
+  
+  container.innerHTML = barHtml + legendHtml + gapsHtml;
 }
 
 function renderTable() {
@@ -2619,6 +3181,71 @@ function generateAIAnswer(q) {
   }
   const a = STATE.analysis;
   const lq = q.toLowerCase();
+
+  // --- New Ask AI handlers for Universal Engine v2.0 ---
+  if (/blank api|show blank/i.test(q)) {
+    if (!a.blankApis || !a.blankApis.length) {
+      return '✅ No blank APIs (silent 200 OK responses with empty data) were detected in this log.';
+    }
+    const list = a.blankApis.map(api => `• <strong>${escHtml(api.name)}</strong>: HTTP ${api.status} | Response Time: ${api.ms}ms<br>&nbsp;&nbsp;<em>Reason:</em> <span style="color:#D97706;">${escHtml(api.blankReason)}</span><br>&nbsp;&nbsp;<em>Rec:</em> ${escHtml(api.recommendation)}`).join('<br><br>');
+    return `🔍 <strong>Blank API Report:</strong><br><br>${list}`;
+  }
+
+  if (/warning|show warning/i.test(q)) {
+    if (!a.warnings || !a.warnings.length) {
+      return '✅ No warnings detected in this log.';
+    }
+    const list = a.warnings.slice(0, 10).map(w => `• <strong>${escHtml(w.classification)}</strong>: ${escHtml(w.message)}<br>&nbsp;&nbsp;<em>Impact:</em> ${escHtml(w.impact)}`).join('<br><br>');
+    return `⚠️ <strong>Warning Analysis Report (showing top 10):</strong><br><br>${list}${a.warnings.length > 10 ? `<br><br><em>And ${a.warnings.length - 10} more warnings. Review the Warning Analysis section on the dashboard for the full list.</em>` : ''}`;
+  }
+
+  if (/business validation|what validated|show business/i.test(q)) {
+    const bizApis = a.apis.filter(api => api.businessResult === 'Business Validation Failure');
+    if (!bizApis.length) {
+      return '✅ No business validation failures detected in the API responses.';
+    }
+    const list = bizApis.map(api => `• <strong>${escHtml(api.name)}</strong> (HTTP ${api.status}): Contains business-level validation failures.<br>&nbsp;&nbsp;<em>Payload snippet:</em> <code>${escHtml((api.response || '').substring(0, 150))}...</code>`).join('<br><br>');
+    return `💼 <strong>Business Validation Failures:</strong><br><br>${list}`;
+  }
+
+  if (/log type|what kind of log/i.test(q)) {
+    return `📋 <strong>Detected Log Type:</strong> <code>${escHtml(a.logType || 'Generic')}</code>`;
+  }
+
+  if (/logger analysis|missing logger|telemetry gap/i.test(q)) {
+    if (!a.loggerStats) return 'No logger statistics available.';
+    const counts = a.loggerStats.counts;
+    let countsStr = Object.entries(counts).map(([lvl, cnt]) => `<strong>${lvl}</strong>: ${cnt}`).join(' | ');
+    let gapsStr = '✅ No logger gaps or incomplete telemetry detected.';
+    if (a.loggerStats.gaps && a.loggerStats.gaps.length) {
+      gapsStr = a.loggerStats.gaps.map(g => `• <strong>${escHtml(g.type)}</strong>: ${escHtml(g.description)}<br>&nbsp;&nbsp;<em>Rec:</em> ${escHtml(g.recommendation)}`).join('<br><br>');
+    }
+    return `📊 <strong>Logger Analysis:</strong><br><br>Level Distribution:<br>${countsStr}<br><br>Telemetry & Gaps:<br>${gapsStr}`;
+  }
+
+  if (/all api|show all api|api list/i.test(q)) {
+    if (!a.apis.length) return 'No API calls detected in the log.';
+    const list = a.apis.map(api => `• <strong>${escHtml(api.name)}</strong>: ${api.method || 'GET'} HTTP ${api.status} (${api.ms}ms) - <span style="font-weight:600;">${api.businessResult || 'Healthy'}</span>`).join('<br>');
+    return `🌐 <strong>Full API Inventory (${a.apis.length} calls):</strong><br><br>${list}`;
+  }
+
+  if (/auth.*fail|unauthorized|forbidden|403|401/i.test(q)) {
+    const authApis = a.apis.filter(api => api.status === 401 || api.status === 403);
+    const authLogs = STATE.parsed.filter(e => /auth|login|token|permission|forbidden|unauthorized/i.test(e.message) && ['ERROR', 'FATAL', 'WARN'].includes(e.level));
+    if (!authApis.length && !authLogs.length) {
+      return '✅ No authentication or authorization failures detected in the log.';
+    }
+    let res = '🔒 <strong>Authentication & Authorization Failures:</strong><br><br>';
+    if (authApis.length) {
+      res += '<strong>Failed APIs:</strong><br>';
+      res += authApis.map(api => `• <strong>${escHtml(api.name)}</strong> returned HTTP ${api.status} (${api.status === 401 ? 'Unauthorized' : 'Forbidden'})`).join('<br>') + '<br><br>';
+    }
+    if (authLogs.length) {
+      res += '<strong>Log Messages:</strong><br>';
+      res += authLogs.slice(0, 5).map(e => `• [${escHtml(e.timestamp)}] [${escHtml(e.level)}] ${escHtml(e.message)}`).join('<br>');
+    }
+    return res;
+  }
 
   // --- New Code Reviewer & Screen Explorer commands ---
   if (/screen flow|show.*flow/i.test(q)) {

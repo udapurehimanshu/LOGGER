@@ -236,6 +236,7 @@
           <polyline points="13 2 13 9 20 9" />
         </svg>
         <span id="topbar-filename">No file loaded — select a sample from the sidebar</span>
+        <span id="log-type-badge" class="log-type-badge" style="display:none; margin-left: 8px;"></span>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
         <!-- Privacy Mode Toggle -->
@@ -517,6 +518,62 @@
             </div>
           </div>
 
+        </div>
+
+        <!-- Blank API Report Card -->
+        <div class="dash-grid" style="grid-template-columns: 1fr; margin-bottom:16px;">
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="8" y1="12" x2="16" y2="12" />
+              </svg>
+              Blank API Report (HTTP 200 with Empty Responses)
+            </div>
+            <div id="blank-api-report-body" style="overflow-x:auto;">
+              <div class="no-data-state" style="padding:20px;">
+                <p>No blank API responses detected</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Warnings & Loggers Row -->
+        <div class="dash-grid" style="margin-bottom:16px;">
+          <!-- Warning Analysis -->
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              Warning Classification
+            </div>
+            <div id="warning-analysis-body">
+              <div class="no-data-state" style="padding:20px;">
+                <p>No warnings analyzed</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Logger Analysis -->
+          <div class="card">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="9" y1="9" x2="15" y2="9"/>
+                <line x1="9" y1="13" x2="15" y2="13"/>
+                <line x1="9" y1="17" x2="13" y2="17"/>
+              </svg>
+              Logger Level & Gaps Analysis
+            </div>
+            <div id="logger-analysis-body">
+              <div class="no-data-state" style="padding:20px;">
+                <p>No logger statistics available</p>
+              </div>
+            </div>
+          </div>
         </div>
 
       </div><!-- /dashboard -->
@@ -962,6 +1019,10 @@
               <button class="quick-q-btn" onclick="askQuestion('What is the fix?')">🔧 What is the fix?</button>
               <button class="quick-q-btn" onclick="askQuestion('Show me the executive summary')">📋 Executive
                 Summary</button>
+              <button class="quick-q-btn" onclick="askQuestion('Show blank APIs')">📭 Show Blank APIs (HTTP 200 Empty)</button>
+              <button class="quick-q-btn" onclick="askQuestion('Show warnings')">⚠️ Show Warnings</button>
+              <button class="quick-q-btn" onclick="askQuestion('Show logger analysis')">📊 Logger Gaps & Levels</button>
+              <button class="quick-q-btn" onclick="askQuestion('Show business validations')">💼 Business Validations</button>
               <button class="quick-q-btn" onclick="askQuestion('Which component failed?')">📦 Which component
                 failed?</button>
               <button class="quick-q-btn" onclick="askQuestion('What HTTP errors are there?')">🌐 HTTP Errors</button>

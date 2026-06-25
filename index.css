@@ -2535,5 +2535,59 @@ body.privacy-active .ts-col {
   line-height: 1;
 }
 
+/* Universal Engine v2.0 Styles */
+.log-type-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.log-type-badge.flex-runtime {
+  background: #EEF2FF;
+  color: #4F46E5;
+  border: 1px solid #C7D2FE;
+}
+.log-type-badge.spring-boot {
+  background: #F0FDF4;
+  color: #16A34A;
+  border: 1px solid #BBF7D0;
+}
+.log-type-badge.python {
+  background: #FEF9C3;
+  color: #CA8A04;
+  border: 1px solid #FEF08A;
+}
+.log-type-badge.nodejs {
+  background: #F0FDF4;
+  color: #15803D;
+  border: 1px solid #DCFCE7;
+}
+.log-type-badge.apache-log4j {
+  background: #FEF2F2;
+  color: #DC2626;
+  border: 1px solid #FEE2E2;
+}
+.log-type-badge.generic {
+  background: #F3F4F6;
+  color: #4B5563;
+  border: 1px solid #E5E7EB;
+}
 
+/* Blank API Table style */
+.blank-api-table th, .blank-api-table td {
+  border-bottom: 1px solid var(--border);
+}
 
+/* Warnings and Confidence Band styles */
+.warning-card {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.confidence-band {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
