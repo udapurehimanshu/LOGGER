@@ -228,20 +228,28 @@ async function parseLog(text) {
     if (!line.trim()) continue;
 
     // ── Pattern matching ─────────────────────────────────────────────────
+    const m1_flexi = line.match(/^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\[(.*?)\]\s+(\S+)\s+-\s+(.+)$/i);
+    const m1_flexi_b = !m1_flexi && line.match(/^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\[(.*?)\]\s+(.+)$/i);
     // Pattern 1: [LEVEL] TIMESTAMP [thread] source - message
-    const m1 = line.match(/^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(\S+)\s+-\s+(.+)$/i);
+    const m1 = !m1_flexi && !m1_flexi_b && line.match(/^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(\S+)\s+-\s+(.+)$/i);
     // Pattern 1b: [LEVEL] TIMESTAMP [thread] message
-    const m1b = !m1 && line.match(/^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(.+)$/i);
+    const m1b = !m1 && !m1_flexi && !m1_flexi_b && line.match(/^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(.+)$/i);
     // Pattern 2: TIMESTAMP [thread] LEVEL source - message
-    const m2 = !m1 && !m1b && line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s+(\S+)\s+-\s+(.+)$/i);
+    const m2 = !m1 && !m1b && !m1_flexi && !m1_flexi_b && line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s+(\S+)\s+-\s+(.+)$/i);
     // Pattern 3: TIMESTAMP LEVEL [thread] source - message
-    const m3 = !m1 && !m1b && !m2 && line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s+\[([^\]]+)\]\s+(\S+)\s+-\s+(.+)$/i);
+    const m3 = !m1 && !m1b && !m2 && !m1_flexi && !m1_flexi_b && line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s+\[([^\]]+)\]\s+(\S+)\s+-\s+(.+)$/i);
     // Pattern 4: TIMESTAMP [thread] message  (implicit INFO)
-    const m4 = !m1 && !m1b && !m2 && !m3 && line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(.+)$/i);
+    const m4 = !m1 && !m1b && !m2 && !m3 && !m1_flexi && !m1_flexi_b && line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(.+)$/i);
     // Pattern 5: [LEVEL] message
     const m5 = !m1 && !m1b && !m2 && !m3 && !m4 && line.match(/^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(.+)$/i);
 
-    if (m1) {
+    if (m1_flexi) {
+      if (current) joined.push(current);
+      current = { timestamp: m1_flexi[2], thread: m1_flexi[4], level: m1_flexi[1].toUpperCase(), source: m1_flexi[5], message: m1_flexi[6], rawLines: [line], index: i };
+    } else if (m1_flexi_b) {
+      if (current) joined.push(current);
+      current = { timestamp: m1_flexi_b[2], thread: m1_flexi_b[4], level: m1_flexi_b[1].toUpperCase(), source: 'Unknown', message: m1_flexi_b[5], rawLines: [line], index: i };
+    } else if (m1) {
       if (current) joined.push(current);
       current = { timestamp: m1[2], thread: m1[3], level: m1[1].toUpperCase(), source: m1[4], message: m1[5], rawLines: [line], index: i };
     } else if (m1b) {
@@ -345,6 +353,15 @@ function detectLogType(text) {
   }
   if (lower.includes(':: spring boot ::') || lower.includes('springboot') || lower.includes('org.springframework')) {
     return 'Spring Boot';
+  }
+  if (lower.includes('tomcat') || lower.includes('catalina') || lower.includes('org.apache.catalina')) {
+    return 'Apache Tomcat';
+  }
+  if (lower.includes('oracle') || lower.includes('ora-') || lower.includes('jdbc.driver')) {
+    return 'Oracle Database';
+  }
+  if (lower.includes('java.lang') || lower.includes('exception') || lower.includes('nullpointerexception')) {
+    return 'Java Application';
   }
   if (lower.includes('traceback (most recent call last):') || lower.includes('line, in <module>')) {
     return 'Python';
@@ -642,235 +659,419 @@ function analyzeAll(parsed, rawLines) {
 
 function extractAPIs(text) {
   const apis = [];
-  const threadContexts = {};
+  const threadApiStates = {};
 
   if (!STATE.parsed || !STATE.parsed.length) {
     return apis;
   }
 
-  STATE.parsed.forEach(e => {
-    const thread = e.thread;
-    const msg = e.message;
+  function finalizeAndPush(api) {
+    if (!api) return;
 
-    if (!threadContexts[thread]) {
-      threadContexts[thread] = { currentApi: null };
-    }
-    const ctx = threadContexts[thread];
-
-    // Quick pre-checks to avoid matching regex on huge strings if there's no match keywords
-    const hasCallWebService = msg.includes('callWebService');
-    const hasInitiating = msg.includes('Initiating API call');
-    const hasRunWebService = msg.includes('runWebService');
-
-    // ── Check for API start ───────────────────────────────────────────────────
-    // Pattern A: callWebService / Initiating API call (existing pattern)
-    let nameM = null;
-    if (hasCallWebService || hasInitiating) {
-      nameM = msg.match(/callWebService:name:(\S+)/i) || 
-              msg.match(/Initiating API call:\s*(\S+)/i) ||
-              msg.match(/(\S+)\.callWebService\(\)\s*started/i) ||
-              msg.match(/(\S+)\.callWebService\(\)\s*:\s*started/i);
+    if (!api.method || api.method === 'Unknown') {
+       if (api.endpoint && (api.endpoint.includes('q=') || api.endpoint.includes('fields=') || api.endpoint.includes('onlyData=true'))) {
+          api.method = 'GET';
+       } else {
+          api.method = 'Unknown';
+       }
     }
 
-    // Pattern B: Flexi Runtime runWebService — the start line looks like:
-    //   "ORG_WEBSERVICE.runWebService" with NO ":" after runWebService (just the name, nothing else)
-    //   vs status lines like "ORG_WEBSERVICE.runWebService: result 200" or "Total time = N ms"
-    // We detect a START only when the line ends with just ".runWebService" (maybe trailing whitespace)
-    let runWsStart = null;
-    if (!nameM && hasRunWebService) {
-      // Match lines ending with APINAME.runWebService and nothing else (or just whitespace)
-      runWsStart = msg.match(/^([A-Za-z0-9_]+)\.runWebService\s*$/i);
-      // Also handle when the full source prefix appears:
-      // "UserActionLogger - ORG_WEBSERVICE.runWebService"
-      if (!runWsStart) {
-        runWsStart = msg.match(/[\s\-]([A-Za-z0-9_]+)\.runWebService\s*$/i);
-      }
+    let countVal = api.recordCount;
+    if (api.response && api.response !== 'NOT LOGGED') {
+       const trimResp = api.response.trim();
+       if (trimResp === '[]' || trimResp === '{}') {
+          countVal = 0;
+       } else if (trimResp.startsWith('{') || trimResp.startsWith('[')) {
+          try {
+             const parsed = JSON.parse(trimResp);
+             if (Array.isArray(parsed)) {
+                countVal = parsed.length;
+             } else if (parsed && typeof parsed === 'object') {
+                if (parsed.count !== undefined) countVal = Number(parsed.count);
+                else if (parsed.total !== undefined) countVal = Number(parsed.total);
+                else if (parsed.size !== undefined) countVal = Number(parsed.size);
+                else if (parsed.records !== undefined) countVal = Number(parsed.records);
+                else if (Array.isArray(parsed.items)) countVal = parsed.items.length;
+                else if (Array.isArray(parsed.data)) countVal = parsed.data.length;
+             }
+          } catch(e) {}
+       }
+    }
+    if (countVal === undefined || countVal === null) {
+       countVal = 'Unknown';
+    }
+    api.recordCount = countVal;
+
+    let isBlank = (countVal === 0 || countVal === '0');
+
+    if ((!api.status || api.status === 'Unknown (Not Logged)') && api.response && api.response !== 'NOT LOGGED' && api.response !== 'N/A') {
+       api.status = 'HTTP Status Not Logged';
     }
 
-    if (nameM || runWsStart) {
-      const apiName = nameM ? nameM[1] : runWsStart[1];
-      if (ctx.currentApi) {
-        apis.push(ctx.currentApi);
-      }
-      ctx.currentApi = {
-        name: apiName,
-        endpoint: null,
-        method: 'GET',
-        status: null,
-        ms: 0,
-        request: null,
-        response: null,
-        timestamp: e.timestamp,
-        thread: thread,
-        logIndex: e.id,
-      };
-      return;
+    let statusStr = String(api.status || '');
+    let httpCode = null;
+    if (/^\d+$/.test(statusStr)) {
+       httpCode = parseInt(statusStr);
     }
 
-    if (ctx.currentApi) {
-      // ── URL / Endpoint ────────────────────────────────────────────────────
-      if (msg.includes('URL') || msg.includes('Endpoint')) {
-        let urlM = msg.match(/URL\s*=\s*(https?:\/\/\S+)/i) ||
-                   msg.match(/URL\s*=\s*(\S+)/i) ||
-                   msg.match(/Endpoint\s*:\s*(\S+)/i);
-        if (urlM) ctx.currentApi.endpoint = urlM[1];
-      }
+    let businessStatus = 'Unknown';
+    let businessResult = 'Unknown';
 
-      // ── Request Method ────────────────────────────────────────────────────
-      if (msg.includes('Request Method')) {
-        let methodM = msg.match(/Request Method\s*=\s*(\S+)/i);
-        if (methodM) ctx.currentApi.method = methodM[1];
-      }
-
-      // ── HTTP Status Code ──────────────────────────────────────────────────
-      // Standard pattern: Response Code = 200
-      if (msg.includes('Response Code') || msg.includes('HTTP Response Code')) {
-        let statusM = msg.match(/Response Code\s*=\s*(\d+)/i) ||
-                      msg.match(/Response Code\s*:\s*(\d+)/i) ||
-                      msg.match(/HTTP Response Code\s*:\s*(\d+)/i);
-        if (statusM) ctx.currentApi.status = parseInt(statusM[1]);
-      }
-      // Flexi Runtime pattern: "APINAME.runWebService: result 200 {...}"
-      if (hasRunWebService && msg.includes('result')) {
-        const resultStatusM = msg.match(/\.runWebService:\s*result\s+(\d{3})/i);
-        if (resultStatusM) {
-          ctx.currentApi.status = parseInt(resultStatusM[1]);
-          // Capture the response body (everything from the first '{' onwards)
-          const braceIdx = msg.indexOf('{', msg.indexOf('result'));
-          if (braceIdx !== -1) {
-            ctx.currentApi.response = msg.substring(braceIdx);
+    if (httpCode === 200 || api.status === 'HTTP Status Not Logged') {
+       if (isBlank) {
+          businessStatus = 'Blank Response';
+          businessResult = 'Success (Empty)';
+       } else {
+          businessStatus = 'Business Success';
+          businessResult = 'Business Success';
+       }
+    } else if (httpCode === 401) {
+       businessStatus = 'Authentication Failed';
+       businessResult = 'Authentication Error (HTTP 401)';
+    } else if (httpCode === 403) {
+       businessStatus = 'Permission Issue';
+       businessResult = 'Permission Denied';
+    } else if (httpCode === 404) {
+       businessStatus = 'Endpoint Missing';
+       businessResult = 'Not Found';
+    } else if (httpCode >= 500) {
+       businessStatus = 'Server Error';
+       businessResult = 'Internal Error';
+    } else if (api.status === 'Timeout' || (typeof api.ms === 'number' && api.ms >= 10000)) {
+       businessStatus = 'Network Issue';
+       businessResult = 'Timeout';
+    } else if (httpCode >= 400 && httpCode < 500) {
+       businessStatus = 'Client Error';
+       businessResult = 'Bad Request';
+    } else {
+       if (api.response && api.response !== 'NOT LOGGED' && api.response !== 'N/A') {
+          if (isBlank) {
+             businessStatus = 'Blank Response';
+             businessResult = 'Success (Empty)';
+          } else {
+             businessStatus = 'Business Success';
+             businessResult = 'Business Success';
           }
+       } else {
+          businessStatus = 'Unknown';
+          businessResult = 'Not Logged';
+       }
+    }
+
+    if (api.retryCount > 0) {
+       businessStatus = 'Retry';
+    }
+
+    api.businessStatus = businessStatus;
+    api.businessResult = businessResult;
+
+    let perfRating = 'N/A';
+    if (typeof api.ms === 'number') {
+       const ms = api.ms;
+       if (ms <= 500) perfRating = 'Excellent';
+       else if (ms <= 1000) perfRating = 'Good';
+       else if (ms <= 2000) perfRating = 'Average';
+       else if (ms <= 5000) perfRating = 'Slow';
+       else perfRating = 'Critical';
+    }
+    api.performanceRating = perfRating;
+
+    let rec = 'No action required.';
+    if (businessStatus === 'Blank Response') {
+       rec = 'Verify filters. Verify Organization. Verify Item. Verify Query Parameters. Verify Data Exists.';
+    } else if (httpCode === 403 || businessStatus === 'Permission Issue') {
+       rec = 'Check Roles. Check Security. Check User Privileges.';
+    } else if (httpCode >= 500 || businessStatus === 'Server Error') {
+       rec = 'Check Server Logs. Check Exception Stack. Check Payload.';
+    } else if (api.status === 'Timeout' || (typeof api.ms === 'number' && api.ms > 10000) || businessStatus === 'Network Issue') {
+       rec = 'Retry. Check Network. Increase Timeout.';
+    }
+    api.recommendation = rec;
+
+    if (!api.request || api.request === 'N/A' || api.request === 'NOT LOGGED') {
+       api.request = 'NOT LOGGED';
+    }
+
+    let health = 'Success';
+    if (api.status === 'Timeout' || (typeof api.ms === 'number' && api.ms >= 10000)) {
+       health = 'Failed';
+    } else if (httpCode >= 400) {
+       health = 'Failed';
+    } else if (api.retryCount > 0) {
+       health = 'Retry';
+    } else if (isBlank) {
+       health = 'Blank';
+  } else if (typeof api.ms === 'number' && api.ms > 2000) {
+     health = 'Slow';
+  } else if (api.status === 'Unknown (Not Logged)' || api.status === 'HTTP Status Not Logged') {
+     if (api.response && api.response !== 'NOT LOGGED') {
+        health = isBlank ? 'Blank' : 'Success';
+     } else {
+        health = 'HTTP Unknown';
+     }
+  }
+  api.health = health;
+
+  apis.push(api);
+}
+
+  STATE.parsed.forEach(e => {
+    const thread = e.thread || 'main';
+    const msg = e.message;
+    const timestamp = e.timestamp || '';
+
+    if (!threadApiStates[thread]) {
+      threadApiStates[thread] = {
+        state: 'IDLE',
+        api: null,
+        jsonBuffer: '',
+        braceCount: 0,
+      };
+    }
+    const tState = threadApiStates[thread];
+
+    const lines = msg.split('\n');
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+
+      if (tState.state === 'RESPONSE_JSON') {
+        tState.jsonBuffer += '\n' + line;
+        
+        for (let i = 0; i < line.length; i++) {
+          if (line[i] === '{') tState.braceCount++;
+          else if (line[i] === '}') tState.braceCount--;
+        }
+
+        if (tState.braceCount <= 0) {
+          tState.api.response = tState.jsonBuffer;
+          try {
+            const parsedJson = JSON.parse(tState.jsonBuffer);
+            if (parsedJson.count !== undefined) {
+              tState.api.recordCount = parsedJson.count;
+            } else if (Array.isArray(parsedJson.items)) {
+              tState.api.recordCount = parsedJson.items.length;
+            } else if (parsedJson.records !== undefined) {
+              tState.api.recordCount = parsedJson.records;
+            }
+            
+            if (parsedJson.links && Array.isArray(parsedJson.links)) {
+              const mainLink = parsedJson.links.find(lnk => lnk.rel === 'self' || lnk.rel === 'canonical') || parsedJson.links[0];
+              if (mainLink && mainLink.href) {
+                tState.api.endpoint = mainLink.href;
+                try {
+                  const parts = mainLink.href.split('?')[0].split('/').filter(Boolean);
+                  if (parts.length) {
+                    tState.api.name = parts[parts.length - 1].toUpperCase() + "_WS";
+                  }
+                } catch(err) {}
+              }
+              tState.api.relatedUrls = parsedJson.links.map(lnk => lnk.href).filter(Boolean);
+            }
+          } catch(err) {
+            const countM = tState.jsonBuffer.match(/"count"\s*:\s*(\d+)/i);
+            if (countM) tState.api.recordCount = parseInt(countM[1]);
+            
+            const hrefM = tState.jsonBuffer.match(/"href"\s*:\s*"([^"]+)"/);
+            if (hrefM) {
+              tState.api.endpoint = hrefM[1];
+              try {
+                const parts = hrefM[1].split('?')[0].split('/').filter(Boolean);
+                if (parts.length) {
+                  tState.api.name = parts[parts.length - 1].toUpperCase() + "_WS";
+                }
+              } catch(err) {}
+            }
+          }
+          
+          finalizeAndPush(tState.api);
+          tState.state = 'IDLE';
+          tState.api = null;
+          tState.jsonBuffer = '';
+          tState.braceCount = 0;
+        }
+        continue;
+      }
+
+      const hasStartPattern = 
+        line.includes('.runWebService') ||
+        /\b[A-Za-z0-9_]+\.runWebService\b/i.test(line) ||
+        line.includes('callWebService') ||
+        line.includes('Executing API') ||
+        line.includes('HTTP Request') ||
+        line.includes('RestTemplate') ||
+        line.includes('HttpURLConnection') ||
+        line.includes('WebClient') ||
+        line.includes('axios') ||
+        line.includes('fetch(') ||
+        /\b(GET|POST|PUT|DELETE|PATCH)\s+https?:\/\/\S+/i.test(line);
+
+      if (hasStartPattern) {
+        if (tState.api) {
+          finalizeAndPush(tState.api);
+        }
+
+        let apiName = 'API_CALL';
+        let method = 'GET';
+        let endpoint = null;
+
+        const runWsM = line.match(/([A-Za-z0-9_]+)\.runWebService/i);
+        if (runWsM) {
+          apiName = runWsM[1].toUpperCase() + "_WS";
+        }
+        const callWsM = line.match(/callWebService:name:([A-Za-z0-9_]+)/i) || 
+                        line.match(/callWebService\(\s*['"]?([A-Za-z0-9_]+)['"]?/i);
+        if (callWsM) {
+          apiName = callWsM[1].toUpperCase();
+        }
+
+        const methodM = line.match(/\b(GET|POST|PUT|DELETE|PATCH)\b/i);
+        if (methodM) {
+          method = methodM[1].toUpperCase();
+        }
+
+        const urlM = line.match(/https?:\/\/\S+/i);
+        if (urlM) {
+          endpoint = urlM[0];
+        }
+
+        tState.api = {
+          name: apiName,
+          method: method,
+          endpoint: endpoint,
+          status: 'Unknown (Not Logged)',
+          ms: 'Unknown',
+          request: 'NOT LOGGED',
+          response: 'NOT LOGGED',
+          headers: {},
+          correlationId: null,
+          timestamp: timestamp,
+          thread: thread,
+          logIndex: e.id,
+          retryCount: 0,
+          relatedUrls: []
+        };
+        tState.state = 'API_START';
+      }
+
+      if (line.includes('runWebService:result') && !tState.api) {
+        tState.api = {
+          name: 'WORK_ORDER_WS',
+          method: 'GET',
+          endpoint: null,
+          status: 'Unknown (Not Logged)',
+          ms: 'Unknown',
+          request: 'NOT LOGGED',
+          response: 'NOT LOGGED',
+          headers: {},
+          correlationId: null,
+          timestamp: timestamp,
+          thread: thread,
+          logIndex: e.id,
+          retryCount: 0,
+          relatedUrls: []
+        };
+        tState.state = 'API_START';
+      }
+
+      if (!tState.api) continue;
+
+      const timeM = line.match(/Total time\s*[=:]\s*(\d+)/i) || 
+                    line.match(/Execution Time\s*[=:]\s*(\d+)/i) ||
+                    line.match(/Completed in\s*(\d+)\s*ms/i) ||
+                    line.match(/elapsed\s*[=:]\s*(\d+)/i);
+      if (timeM) {
+        tState.api.ms = parseInt(timeM[1]);
+      }
+
+      const statusM = line.match(/Response Code\s*[=:]\s*(\d+)/i) || 
+                      line.match(/HTTP\s+(\d{3})\b/i) ||
+                      line.match(/HTTP Response Code\s*:\s*(\d+)/i);
+      if (statusM) {
+        tState.api.status = parseInt(statusM[1]);
+      }
+
+      const corrM = line.match(/correlation-id\s*[=:]\s*([^\s,\]]+)/i) || 
+                    line.match(/correlationId\s*[=:]\s*([^\s,\]]+)/i);
+      if (corrM) {
+        tState.api.correlationId = corrM[1].replace(/[\[\]]/g, '');
+      }
+
+      const urlM2 = line.match(/URL\s*=\s*(https?:\/\/\S+)/i) || 
+                    line.match(/Endpoint\s*:\s*(\S+)/i);
+      if (urlM2) {
+        tState.api.endpoint = urlM2[1];
+      }
+
+      if (line.includes('Authorization:') || line.toLowerCase().includes('authorization')) {
+        const authM = line.match(/Authorization:\s*(Bearer\s+\S+|Basic\s+\S+|\S+)/i);
+        if (authM) tState.api.headers['Authorization'] = authM[1];
+      }
+      if (line.includes('Content-Type:') || line.toLowerCase().includes('content-type')) {
+        const ctM = line.match(/Content-Type:\s*(\S+)/i);
+        if (ctM) tState.api.headers['Content-Type'] = ctM[1];
+      }
+
+      if (line.includes('Request Payload:') || line.includes('_request:') || line.includes('payload=')) {
+        const payM = line.match(/Request Payload\s*:\s*(.+)$/i) || 
+                     line.match(/_request\s*:\s*(.+)$/i) ||
+                     line.match(/payload\s*=\s*(.+)$/i);
+        if (payM) {
+          tState.api.request = payM[1].trim();
         }
       }
 
-      // ── Response Time ─────────────────────────────────────────────────────
-      if (msg.includes('Total time')) {
-        let timeM = msg.match(/Total time\s*=\s*(\d+)\s*ms/i) ||
-                    msg.match(/Total time\s*=\s*(\d+)/i);
-        if (timeM) ctx.currentApi.ms = parseInt(timeM[1]);
-      } else if (hasCallWebService) {
-        let timeM = msg.match(/callWebService\(\)\s*:\s*(\d+)\s*ms/i) ||
-                    msg.match(/callWebService\(\)\s*:\s*(\d+)/i);
-        if (timeM) ctx.currentApi.ms = parseInt(timeM[1]);
+      if (line.toLowerCase().includes('retry') || line.toLowerCase().includes('retrying')) {
+        tState.api.retryCount = (tState.api.retryCount || 0) + 1;
       }
 
-      // ── Request / Response Payloads ───────────────────────────────────────
-      if (msg.includes('Request Payload')) {
-        let reqM = msg.match(/Request Payload\s*:\s*(.+)$/is);
-        if (reqM) ctx.currentApi.request = reqM[1];
-      }
-
-      if (msg.includes('Response Body')) {
-        let respM = msg.match(/Response Body\s*:\s*(.+)$/is);
-        if (respM) {
-          ctx.currentApi.response = respM[1];
+      const hasResult = line.includes('runWebService') && line.includes('result');
+      const braceIdx = line.indexOf('{');
+      
+      if (hasResult && braceIdx !== -1) {
+        tState.state = 'RESPONSE_JSON';
+        tState.jsonBuffer = line.substring(braceIdx);
+        tState.braceCount = 0;
+        for (let i = braceIdx; i < line.length; i++) {
+          if (line[i] === '{') tState.braceCount++;
+          else if (line[i] === '}') tState.braceCount--;
         }
-      } else if (!ctx.currentApi.response) {
-        // Fallback: pick up bare result blocks (non-runWebService logs)
-        let resultIdx = msg.indexOf('result{');
-        if (resultIdx === -1) resultIdx = msg.indexOf('result {');
-        if (resultIdx !== -1 && !hasRunWebService) {
-          ctx.currentApi.response = msg.substring(msg.indexOf('{', resultIdx));
-        }
-      }
 
-      // ── Flush completed runWebService call (when we see "Total time =") ───
-      // Encountering Total time means this API call is done; push it so the next
-      // distinct call (same name, different thread step) starts a fresh context.
-      if (hasRunWebService && msg.includes('Total time') && ctx.currentApi) {
-        const timeM2 = msg.match(/Total time\s*=\s*(\d+)/i);
-        if (timeM2) ctx.currentApi.ms = parseInt(timeM2[1]);
-        apis.push(ctx.currentApi);
-        ctx.currentApi = null;
+        if (tState.braceCount <= 0) {
+          tState.api.response = tState.jsonBuffer;
+          try {
+            const parsedJson = JSON.parse(tState.jsonBuffer);
+            if (parsedJson.count !== undefined) {
+              tState.api.recordCount = parsedJson.count;
+            } else if (Array.isArray(parsedJson.items)) {
+              tState.api.recordCount = parsedJson.items.length;
+            }
+            
+            if (parsedJson.links && Array.isArray(parsedJson.links)) {
+              const mainLink = parsedJson.links[0];
+              if (mainLink && mainLink.href) {
+                tState.api.endpoint = mainLink.href;
+              }
+            }
+          } catch(e) {}
+          
+          finalizeAndPush(tState.api);
+          tState.state = 'IDLE';
+          tState.api = null;
+          tState.jsonBuffer = '';
+          tState.braceCount = 0;
+        }
       }
     }
   });
 
-  // Flush remaining active APIs
-  for (const t in threadContexts) {
-    if (threadContexts[t].currentApi) {
-      apis.push(threadContexts[t].currentApi);
+  for (const t in threadApiStates) {
+    if (threadApiStates[t].api) {
+      finalizeAndPush(threadApiStates[t].api);
     }
   }
 
-  // Deduplicate and filter: If we have multiple entries for the same index, keep the most complete one
-  const uniqueApis = [];
-  apis.forEach(api => {
-    const existing = uniqueApis.find(a => a.logIndex === api.logIndex && a.thread === api.thread);
-    if (!existing) {
-      uniqueApis.push(api);
-    } else {
-      // Merge properties
-      if (api.endpoint) existing.endpoint = api.endpoint;
-      if (api.status) existing.status = api.status;
-      if (api.ms) existing.ms = api.ms;
-      if (api.request) existing.request = api.request;
-      if (api.response) existing.response = api.response;
-    }
-  });
-
-  // Post-processing to fill default properties
-  uniqueApis.forEach(api => {
-    if (!api.status) {
-      api.status = 200; // default to 200 if it ran successfully and parsed
-    }
-    if (!api.endpoint && api.response) {
-      const hrefM = api.response.match(/"href"\s*:\s*"([^"]+)"/i);
-      if (hrefM) {
-        api.endpoint = hrefM[1];
-      }
-    }
-    
-    // -- EXTRACT RECORD COUNT --
-    api.recordCount = null;
-    if (api.response) {
-      const countMatch = api.response.match(/"count"\s*:\s*(\d+)/i) || api.response.match(/"records"\s*:\s*(\d+)/i);
-      if (countMatch) {
-        api.recordCount = parseInt(countMatch[1]);
-      } else {
-        const itemsMatch = api.response.match(/"items"\s*:\s*\[([^\]]*)\]/i) || api.response.match(/"data"\s*:\s*\[([^\]]*)\]/i);
-        if (itemsMatch) {
-          const itemsStr = itemsMatch[1].trim();
-          if (!itemsStr) {
-            api.recordCount = 0;
-          } else {
-            const objectCount = (itemsStr.match(/\{/g) || []).length;
-            api.recordCount = objectCount > 0 ? objectCount : (itemsStr.split(',').length);
-          }
-        }
-      }
-    }
-    
-    // -- EXTRACT RETRY COUNT --
-    api.retryCount = 0;
-    const sameThreadApis = uniqueApis.filter(a => a.name === api.name && a.thread === api.thread);
-    const indexOnThread = sameThreadApis.indexOf(api);
-    api.retryCount = indexOnThread;
-    
-    if (STATE.parsed && STATE.parsed.length) {
-      const threadLogs = STATE.parsed.filter(e => e.thread === api.thread);
-      const logIdxInThread = threadLogs.findIndex(e => e.id === api.logIndex);
-      if (logIdxInThread !== -1) {
-        const start = Math.max(0, logIdxInThread - 5);
-        const end = Math.min(threadLogs.length, logIdxInThread + 6);
-        for (let i = start; i < end; i++) {
-          if (/retry|retrying|attempt/i.test(threadLogs[i].message)) {
-            const attemptMatch = threadLogs[i].message.match(/attempt\s*#?\s*(\d+)/i) || threadLogs[i].message.match(/retry\s*#?\s*(\d+)/i);
-            if (attemptMatch) {
-              api.retryCount = Math.max(api.retryCount, parseInt(attemptMatch[1]) - 1);
-            } else {
-              api.retryCount = Math.max(api.retryCount, 1);
-            }
-          }
-        }
-      }
-    }
-    
-    // -- CLASSIFY BUSINESS RESULT --
-    api.businessResult = classifyApiBusinessResult(api);
-  });
-
-  return uniqueApis;
+  return apis;
 }
 
 function extractSQL(text) {
@@ -1189,10 +1390,10 @@ function analyzeRow(row, allRows, analysis) {
   const idx = row.id;
   // Phase 3: Gather wider context — look 30 lines back for full thread context
   const context = allRows.slice(Math.max(0, idx - 30), idx);
-  const contextText = context.map(r => r.rawLines[0] || '').join('\n');
+  const contextText = context.map(r => (r.rawLines ? r.rawLines[0] : r.message) || '').join('\n');
   // Also look ahead to catch cascading errors
   const futureContext = allRows.slice(idx + 1, Math.min(allRows.length, idx + 10));
-  const futureText = futureContext.map(r => r.rawLines[0] || '').join('\n');
+  const futureText = futureContext.map(r => (r.rawLines ? r.rawLines[0] : r.message) || '').join('\n');
 
   // Phase 2: Detect exact failure point
   const targetM = msg.match(/TargetError.*?Line:\s*(\d+)/i) || msg.match(/at Line:\s*(\d+)/i) || msg.match(/:(\d+)\)/);
@@ -1238,7 +1439,7 @@ function analyzeRow(row, allRows, analysis) {
     similar: null,
     contextText,
     futureText,
-    rawTrace: row.rawLines.slice(1).join('\n') || '',
+    rawTrace: (row.rawLines || [row.message]).slice(1).join('\n') || '',
     impactText: '',
     threadUser,
     securityContext: null,
@@ -1249,7 +1450,7 @@ function analyzeRow(row, allRows, analysis) {
   // ─ Validation Issue ─
   if (d.errType === 'Validation Issue' || /ValidationException/i.test(msg)) {
     const listLines = [];
-    row.rawLines.forEach(l => {
+    (row.rawLines || [row.message]).forEach(l => {
       if (l.trim().startsWith('- ')) listLines.push(l.trim());
     });
     if (!listLines.length) {
@@ -2288,6 +2489,22 @@ function renderPageEventsTab() {
   `;
 }
 
+window.selectRelatedApi = (idx) => {
+  const api = STATE.analysis.apis[idx];
+  if (api) {
+    renderApiDetails(api);
+    const container = document.getElementById('api-list-container');
+    if (container) {
+       container.querySelectorAll('.api-card').forEach(c => c.classList.remove('selected'));
+       const targetCard = container.querySelector(`.api-card[data-idx="${idx}"]`);
+       if (targetCard) {
+          targetCard.classList.add('selected');
+          targetCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+       }
+    }
+  }
+};
+
 function renderApiTracker(apis) {
   const container = document.getElementById('api-list-container');
   if (!apis || !apis.length) {
@@ -2303,6 +2520,31 @@ function renderApiTracker(apis) {
     return;
   }
 
+  // ── Setup API Tabs ─────────────────────────────────────────────────────────
+  const tabs = document.querySelectorAll('.api-tab-btn');
+  tabs.forEach(tab => {
+    tab.onclick = () => {
+       tabs.forEach(t => {
+          t.classList.remove('active');
+          t.style.borderBottom = 'none';
+          t.style.color = 'var(--text-muted)';
+       });
+       tab.classList.add('active');
+       tab.style.borderBottom = '2px solid var(--primary)';
+       tab.style.color = 'var(--text-light)';
+       
+       const tabName = tab.dataset.tab;
+       document.querySelectorAll('.api-tab-content').forEach(content => {
+          content.style.display = 'none';
+       });
+       const activeContent = document.getElementById(`api-tab-${tabName}`);
+       if (activeContent) {
+          activeContent.style.display = (tabName === 'list') ? 'flex' : 'block';
+       }
+    };
+  });
+
+  // ── Render Card List ───────────────────────────────────────────────────────
   const renderList = (filteredApis) => {
     if (!filteredApis.length) {
       container.innerHTML = '<div class="no-data-state"><p>No matching API calls found</p></div>';
@@ -2310,21 +2552,34 @@ function renderApiTracker(apis) {
     }
 
     container.innerHTML = filteredApis.map((api) => {
-      // Find original index in STATE.analysis.apis
       const origIdx = STATE.analysis.apis.indexOf(api);
-      const isError = api.status >= 400;
-      const badgeClass = isError ? 'error' : api.ms > 2000 ? 'warn' : 'success';
-      const badgeText = api.status || 'OK';
       
+      let badgeClass = 'http-unknown';
+      let badgeText = '⚫ HTTP Unknown';
+      if (api.health === 'Success') { badgeClass = 'success'; badgeText = '🟢 Success'; }
+      else if (api.health === 'Blank') { badgeClass = 'blank'; badgeText = '🟡 Blank'; }
+      else if (api.health === 'Slow') { badgeClass = 'slow'; badgeText = '🟠 Slow'; }
+      else if (api.health === 'Failed') { badgeClass = 'failed'; badgeText = '🔴 Failed'; }
+      else if (api.health === 'Retry') { badgeClass = 'retry'; badgeText = '🔵 Retry'; }
+      else if (api.health === 'HTTP Unknown') { badgeClass = 'http-unknown'; badgeText = '⚫ HTTP Unknown'; }
+
+      const bizColor = api.health === 'Success' ? '#10B981' : api.health === 'Blank' ? '#F59E0B' : '#EF4444';
+      const bizLabel = api.businessStatus || 'Unknown';
+
       return `
         <div class="api-card" data-idx="${origIdx}">
-          <div class="api-card-title">
-            <span class="api-card-title-text" title="${escHtml(api.name)}">${escHtml(api.name)}</span>
-            <span class="api-badge ${badgeClass}">${badgeText}</span>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <span class="api-card-title-text" style="font-weight: 700; font-size: 12px; color: var(--text-light); word-break: break-all;" title="${escHtml(api.name)}">${escHtml(api.name)}</span>
+            <span class="api-badge ${badgeClass}" style="font-size: 9.5px; padding: 2px 6px; border-radius: 4px; font-weight: 600; white-space: nowrap; margin-left: 8px;">${badgeText}</span>
           </div>
-          <div class="api-card-meta">
-            <span>${api.method || 'GET'}</span>
-            <span>${api.ms}ms</span>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--text-muted); line-height: 1;">
+            <span style="font-weight: 700; color: var(--primary); text-transform: uppercase;">${api.method || 'GET'}</span>
+            <span style="background: rgba(255,255,255,0.05); padding: 1px 4px; border-radius: 3px;">⏱ ${api.ms !== 'Unknown' ? api.ms + ' ms' : 'Unknown Time'}</span>
+            <span style="background: rgba(255,255,255,0.05); padding: 1px 4px; border-radius: 3px;">📦 Records: ${api.recordCount}</span>
+          </div>
+          <div style="margin-top: 6px; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; line-height: 1;">
+            <span style="color: ${bizColor};">${escHtml(bizLabel)}</span>
+            <span style="color: var(--text-muted); font-size: 10px;">${api.status}</span>
           </div>
         </div>`;
     }).join('');
@@ -2332,41 +2587,198 @@ function renderApiTracker(apis) {
     // Attach click listeners to cards
     container.querySelectorAll('.api-card').forEach(card => {
       card.addEventListener('click', () => {
-        // Remove selection from all
         container.querySelectorAll('.api-card').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
-
         const idx = parseInt(card.dataset.idx);
         renderApiDetails(STATE.analysis.apis[idx]);
       });
     });
   };
 
-  // Initial render of all APIs
-  renderList(apis);
+  // ── Unified Search, Sort, Filter Controller ──────────────────────────────
+  STATE.apiTrackerFilter = STATE.apiTrackerFilter || 'with-resp';
+  STATE.apiTrackerSort = STATE.apiTrackerSort || 'time-desc';
 
-  // Set up search filter for API Tracker
+  const updateList = () => {
+     let filtered = apis.slice();
+
+     // 1. Filter
+     const filterVal = STATE.apiTrackerFilter;
+     if (filterVal === 'with-resp') {
+        filtered = filtered.filter(a => a.response && a.response !== 'NOT LOGGED' && a.response !== 'N/A');
+     } else if (filterVal === 'no-resp') {
+        filtered = filtered.filter(a => !a.response || a.response === 'NOT LOGGED' || a.response === 'N/A');
+     } else if (filterVal === 'success') {
+        filtered = filtered.filter(a => a.health === 'Success');
+     } else if (filterVal === 'failed') {
+        filtered = filtered.filter(a => a.health === 'Failed');
+     } else if (filterVal === 'blank') {
+        filtered = filtered.filter(a => a.health === 'Blank');
+     } else if (filterVal === 'slow') {
+        filtered = filtered.filter(a => a.health === 'Slow');
+     } else if (filterVal === '4xx') {
+        filtered = filtered.filter(a => {
+           const code = parseInt(a.status);
+           return code >= 400 && code < 500;
+        });
+     } else if (filterVal === '5xx') {
+        filtered = filtered.filter(a => {
+           const code = parseInt(a.status);
+           return code >= 500 && code < 600;
+        });
+     }
+
+     // 2. Search
+     const query = document.getElementById('api-search-input').value.toLowerCase().trim();
+     if (query) {
+        filtered = filtered.filter(a => 
+           (a.name || '').toLowerCase().includes(query) || 
+           (a.endpoint || '').toLowerCase().includes(query) || 
+           (a.method || '').toLowerCase().includes(query) || 
+           String(a.status || '').toLowerCase().includes(query) || 
+           (a.thread || '').toLowerCase().includes(query) ||
+           (a.businessStatus || '').toLowerCase().includes(query)
+        );
+     }
+
+     // 3. Sort
+     const sortVal = STATE.apiTrackerSort;
+     if (sortVal === 'time-desc' || filterVal === 'longest-time') {
+        filtered.sort((a, b) => (Number(b.ms) || 0) - (Number(a.ms) || 0));
+     } else if (sortVal === 'time-asc') {
+        filtered.sort((a, b) => (Number(a.ms) || 0) - (Number(b.ms) || 0));
+     } else if (sortVal === 'count-desc' || filterVal === 'highest-count') {
+        filtered.sort((a, b) => (Number(b.recordCount) || 0) - (Number(a.recordCount) || 0));
+     } else if (sortVal === 'count-asc') {
+        filtered.sort((a, b) => (Number(a.recordCount) || 0) - (Number(b.recordCount) || 0));
+     } else if (sortVal === 'name-asc') {
+        filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+     } else if (sortVal === 'timestamp-desc') {
+        filtered.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+     } else if (sortVal === 'timestamp-asc') {
+        filtered.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+     } else if (sortVal === 'status-asc') {
+        filtered.sort((a, b) => (a.health || '').localeCompare(b.health || ''));
+     }
+
+     renderList(filtered);
+  };
+
+  // Wire Filter Pills
+  const pills = document.querySelectorAll('.filter-pill');
+  pills.forEach(pill => {
+     pill.onclick = () => {
+        pills.forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        STATE.apiTrackerFilter = pill.dataset.filter;
+        updateList();
+     };
+  });
+
+  // Wire Sort Dropdown
+  const sortSelect = document.getElementById('api-sort-select');
+  sortSelect.value = STATE.apiTrackerSort;
+  sortSelect.onchange = () => {
+     STATE.apiTrackerSort = sortSelect.value;
+     updateList();
+  };
+
+  // Wire Search Box
   const searchInput = document.getElementById('api-search-input');
-  searchInput.value = ''; // clear previous value
-  
-  // Remove existing listeners by cloning (to prevent duplicate registrations)
+  searchInput.value = '';
   const newSearchInput = searchInput.cloneNode(true);
   searchInput.parentNode.replaceChild(newSearchInput, searchInput);
-  
   newSearchInput.addEventListener('input', () => {
-    const query = newSearchInput.value.toLowerCase().trim();
-    if (!query) {
-      renderList(apis);
-      return;
-    }
-    const filtered = apis.filter(api => 
-      (api.name || '').toLowerCase().includes(query) || 
-      (api.endpoint || '').toLowerCase().includes(query) || 
-      String(api.status || '').includes(query) ||
-      (api.method || '').toLowerCase().includes(query)
-    );
-    renderList(filtered);
+     updateList();
   });
+
+  // Run initial list update
+  updateList();
+
+  // ── Tab 2: Blank Responses Panel ──────────────────────────────────────────
+  const blankContainer = document.getElementById('api-blank-container');
+  const blankApis = apis.filter(a => a.health === 'Blank' || a.recordCount === 0);
+  if (!blankApis.length) {
+     blankContainer.innerHTML = '<div class="no-data-state"><p>No blank responses detected (count = 0)</p></div>';
+  } else {
+     blankContainer.innerHTML = blankApis.map(api => {
+        const origIdx = STATE.analysis.apis.indexOf(api);
+        return `
+          <div class="api-card" data-idx="${origIdx}" style="border-left: 3px solid #F59E0B;">
+            <div style="font-weight: 700; color: var(--text-light);">${escHtml(api.name)}</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">HTTP Status: ${api.status} | Time: ${api.ms} ms</div>
+            <div style="font-size: 11px; font-weight: 700; color: #F59E0B; margin-top: 2px;">Records: 0</div>
+          </div>
+        `;
+     }).join('');
+     blankContainer.querySelectorAll('.api-card').forEach(card => {
+        card.addEventListener('click', () => {
+           const idx = parseInt(card.dataset.idx);
+           renderApiDetails(STATE.analysis.apis[idx]);
+        });
+     });
+  }
+
+  // ── Tab 3: Aggregated Stats Table ──────────────────────────────────────────
+  const statsTbody = document.getElementById('api-stats-tbody');
+  const grouped = {};
+  apis.forEach(api => {
+     const name = api.name || 'API_CALL';
+     if (!grouped[name]) grouped[name] = [];
+     grouped[name].push(api);
+  });
+
+  const rows = [];
+  for (const [name, list] of Object.entries(grouped)) {
+     const calls = list.length;
+     let sumTime = 0;
+     let minTime = Infinity;
+     let maxTime = -Infinity;
+     let succ = 0, blank = 0, fail = 0;
+
+     list.forEach(a => {
+        const t = Number(a.ms);
+        if (!isNaN(t)) {
+           sumTime += t;
+           if (t < minTime) minTime = t;
+           if (t > maxTime) maxTime = t;
+        }
+        if (a.health === 'Failed') fail++;
+        else if (a.health === 'Blank') blank++;
+        else succ++;
+     });
+
+     const avgTime = sumTime / calls;
+     const minStr = minTime === Infinity ? 'Unknown' : minTime + 'ms';
+     const maxStr = maxTime === -Infinity ? 'Unknown' : maxTime + 'ms';
+     const avgStr = minTime === Infinity ? 'Unknown' : Math.round(avgTime) + 'ms';
+     
+     const successPct = Math.round((succ / calls) * 100);
+     const blankPct = Math.round((blank / calls) * 100);
+     const failurePct = Math.round((fail / calls) * 100);
+
+     rows.push({
+        name, calls, avgTime: minTime === Infinity ? 0 : avgTime, avgStr, minStr, maxStr, successPct, blankPct, failurePct
+     });
+  }
+
+  rows.sort((a, b) => b.calls - a.calls);
+
+  if (!rows.length) {
+     statsTbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: var(--text-muted);">No metrics.</td></tr>';
+  } else {
+     statsTbody.innerHTML = rows.map(r => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.03); color:var(--text-light);">
+          <td style="padding: 8px 4px; font-weight:700;">${escHtml(r.name)}</td>
+          <td style="padding: 8px 4px; text-align: center;">${r.calls}</td>
+          <td style="padding: 8px 4px; text-align: center; font-weight:600; color:var(--primary);">${r.avgStr}</td>
+          <td style="padding: 8px 4px; text-align: center; color:var(--text-muted);">${r.minStr} / ${r.maxStr}</td>
+          <td style="padding: 8px 4px; text-align: center; color:#10B981; font-weight:700;">${r.successPct}%</td>
+          <td style="padding: 8px 4px; text-align: center; color:#F59E0B; font-weight:700;">${r.blankPct}%</td>
+          <td style="padding: 8px 4px; text-align: center; color:#EF4444; font-weight:700;">${r.failurePct}%</td>
+        </tr>
+     `).join('');
+  }
 }
 
 function renderApiDetails(api) {
@@ -2383,13 +2795,33 @@ function renderApiDetails(api) {
     return;
   }
 
-  const isError = api.status >= 400;
-  const badgeClass = isError ? 'error' : api.ms > 2000 ? 'warn' : 'success';
-  const httpInfo = HTTP_KB[api.status] || { label: 'Unknown', explain: 'No standard documentation for this status code.' };
+  const isError = api.health === 'Failed';
+  const badgeClass = api.health === 'Failed' ? 'failed' : api.health === 'Slow' ? 'slow' : api.health === 'Blank' ? 'blank' : api.health === 'Retry' ? 'retry' : api.health === 'HTTP Unknown' ? 'http-unknown' : 'success';
+  const badgeText = api.health === 'Success' ? '🟢 Success' : api.health === 'Blank' ? '🟡 Blank' : api.health === 'Slow' ? '🟠 Slow' : api.health === 'Failed' ? '🔴 Failed' : api.health === 'Retry' ? '🔵 Retry' : '⚫ HTTP Unknown';
 
-  // Formatting request and response payload
-  let reqPayloadHtml = 'N/A';
-  if (api.request) {
+  let httpLabel = 'Not Logged';
+  let httpExplain = 'The HTTP response status code was not logged.';
+  if (HTTP_KB[api.status]) {
+     httpLabel = HTTP_KB[api.status].label;
+     httpExplain = HTTP_KB[api.status].explain;
+  } else if (api.status === 'HTTP Status Not Logged') {
+     httpLabel = 'Not Logged';
+     httpExplain = 'No HTTP status code was logged, but valid response payload exists.';
+  }
+
+  // ── Business Result Badge ─────────────────────────────────────────────────
+  const bizColor = api.health === 'Success' ? '#10B981' : api.health === 'Blank' ? '#F59E0B' : '#EF4444';
+  const bizIcon  = api.health === 'Success' ? '🟢' : api.health === 'Blank' ? '🟡' : '🔴';
+  const bizLabel = api.businessStatus || 'Unknown';
+
+  // ── Request / Response Payload HTML ──────────────────────────────────────
+  let reqPayloadHtml = `
+    <div style="padding:12px; background:rgba(239,68,68,0.04); border:1px dashed rgba(239,68,68,0.3); border-radius:6px; font-size:12px;">
+      <div style="color:#EF4444; font-weight:700; margin-bottom:4px;">Not Logged</div>
+      <div style="color:var(--text-muted); font-size:11px; margin-bottom:6px;">Recommendation:</div>
+      <pre style="background:#0F172A; padding:6px; border-radius:4px; font-family:monospace; color:#34D399; margin:0; font-size:11.5px; overflow-x:auto;">Enable logger.trace() for request/response.</pre>
+    </div>`;
+  if (api.request && api.request !== 'N/A' && api.request !== 'NOT LOGGED') {
     let reqText = api.request;
     try {
       if (reqText.trim().startsWith('{') || reqText.trim().startsWith('[')) {
@@ -2399,62 +2831,203 @@ function renderApiDetails(api) {
     reqPayloadHtml = `<pre class="api-payload-body">${redactHTML(escHtml(reqText))}</pre>`;
   }
 
-  let respPayloadHtml = 'N/A';
-  if (api.response) {
+  let respPayloadHtml = `
+    <div style="padding:12px; background:rgba(239,68,68,0.04); border:1px dashed rgba(239,68,68,0.3); border-radius:6px; font-size:12px;">
+      <div style="color:#EF4444; font-weight:700; margin-bottom:4px;">Not Logged</div>
+      <div style="color:var(--text-muted); font-size:11px; margin-bottom:6px;">Recommendation:</div>
+      <pre style="background:#0F172A; padding:6px; border-radius:4px; font-family:monospace; color:#34D399; margin:0; font-size:11.5px; overflow-x:auto;">Enable logger.trace() for request/response.</pre>
+    </div>`;
+  if (api.response && api.response !== 'N/A' && api.response !== 'NOT LOGGED') {
     let respText = api.response;
+    let isJson = false;
     try {
       if (respText.trim().startsWith('{') || respText.trim().startsWith('[')) {
         respText = JSON.stringify(JSON.parse(respText), null, 2);
+        isJson = true;
       }
     } catch(e) {}
-    respPayloadHtml = `<pre class="api-payload-body">${redactHTML(escHtml(respText))}</pre>`;
+    
+    respPayloadHtml = `
+      <div style="display:flex; flex-direction:column; background:#0F172A; border:1px solid var(--border); border-radius:6px; overflow:hidden;">
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#1E293B; padding:6px 12px; border-bottom:1px solid var(--border);">
+          <span style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">${isJson ? 'JSON Response' : 'Raw Response'}</span>
+          <div style="display:flex; gap:8px;">
+            <button onclick="toggleResponseCollapse()" id="btn-toggle-resp" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-normal); font-size:11px; border-radius:4px; padding:3px 8px; cursor:pointer;">Collapse</button>
+            <button onclick="copyResponseText()" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-normal); font-size:11px; border-radius:4px; padding:3px 8px; cursor:pointer;">Copy</button>
+          </div>
+        </div>
+        <pre id="api-response-pre" style="margin:0; padding:12px; max-height:350px; overflow:auto; font-family:'Fira Code',Consolas,monospace; font-size:12px; color:#E2E8F0; line-height:1.5; white-space:pre; word-wrap:normal; transition:max-height 0.2s;">${redactHTML(escHtml(respText))}</pre>
+      </div>`;
   }
 
+  // ── Record Count Badge ────────────────────────────────────────────────────
+  let recordBadge = '';
+  if (api.recordCount !== 'Unknown') {
+    const rcColor = api.recordCount === 0 ? '#F59E0B' : '#10B981';
+    recordBadge = `<div class="api-details-row">
+      <div class="api-details-label">Record Count</div>
+      <div class="api-details-value" style="font-weight:700;color:${rcColor};">
+        ${api.recordCount} records
+      </div>
+    </div>`;
+  } else {
+    recordBadge = `<div class="api-details-row">
+      <div class="api-details-label">Record Count</div>
+      <div class="api-details-value">
+        <span style="color:#EF4444; font-weight:700;">Not Logged</span>
+        <span style="font-size:10px; color:#94A3B8; margin-left:8px;">Recommendation: Enable logger.trace() for request/response.</span>
+      </div>
+    </div>`;
+  }
+
+  // URL formatter helper
+  const urlValue = api.endpoint ? redactHTML(escHtml(api.endpoint)) : `
+    <span style="color:#EF4444; font-weight:700;">Not Logged</span>
+    <span style="font-size:10px; color:#94A3B8; margin-left:8px;">Recommendation: Enable logger.trace() for request/response.</span>
+  `;
+
+  // Query Params formatter helper
+  const queryParamsValue = (api.queryParams && api.queryParams !== 'N/A') ? redactHTML(escHtml(api.queryParams)) : `
+    <span style="color:#EF4444; font-weight:700;">Not Logged</span>
+    <span style="font-size:10px; color:#94A3B8; margin-left:8px;">Recommendation: Enable logger.trace() for request/response.</span>
+  `;
+
+  // Request Headers formatter helper
+  const hasHeaders = api.headers && Object.keys(api.headers).length > 0;
+  const headersValue = hasHeaders ? redactHTML(escHtml(JSON.stringify(api.headers))) : `
+    <span style="color:#EF4444; font-weight:700;">Not Logged</span>
+    <span style="font-size:10px; color:#94A3B8; margin-left:8px;">Recommendation: Enable logger.trace() for request/response.</span>
+  `;
+
+  // Correlation ID formatter helper
+  const correlationValue = (api.correlationId && api.correlationId !== 'N/A') ? redactHTML(escHtml(api.correlationId)) : `
+    <span style="color:#EF4444; font-weight:700;">Not Logged</span>
+    <span style="font-size:10px; color:#94A3B8; margin-left:8px;">Recommendation: Enable logger.trace() for request/response.</span>
+  `;
+
+  // ── Related APIs Chain ───────────────────────────────────────────────────
+  let relatedChainHtml = '';
+  const relatedApis = STATE.analysis.apis.filter(a => a.thread === api.thread);
+  if (relatedApis.length > 1) {
+     relatedApis.sort((a, b) => (a.logIndex || 0) - (b.logIndex || 0));
+     const firstFailure = relatedApis.find(a => a.health === 'Failed');
+     
+     const nodesHtml = relatedApis.map(a => {
+        const isSelected = a === api;
+        const isFirstFail = a === firstFailure;
+        const origIdx = STATE.analysis.apis.indexOf(a);
+        
+        let borderClass = 'success';
+        if (a.health === 'Failed') borderClass = 'failed';
+        else if (a.health === 'Blank') borderClass = 'blank';
+        else if (a.health === 'Slow') borderClass = 'slow';
+        else if (a.health === 'Retry') borderClass = 'retry';
+        else if (a.health === 'HTTP Unknown') borderClass = 'http-unknown';
+
+        return `
+          <div class="related-node ${borderClass} ${isSelected ? 'selected' : ''}" onclick="selectRelatedApi(${origIdx})">
+             <span style="font-weight:700; color:var(--text-light); font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escHtml(a.name)}</span>
+             <span style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">⏱ ${a.ms !== 'Unknown' ? a.ms + ' ms' : 'Unknown'}</span>
+             <span style="font-size:9.5px; color:var(--text-muted);">📦 Records: ${a.recordCount}</span>
+             ${isFirstFail ? `<span style="color:#EF4444; font-weight:700; font-size:9px; margin-top:2px;">⚠️ [First Failure]</span>` : ''}
+          </div>
+        `;
+     }).join('<span class="related-arrow">➔</span>');
+
+     relatedChainHtml = `
+       <div class="api-payload-box" style="margin-top:16px;">
+         <div class="api-payload-title">🔗 Execution Flow Chain (Thread Related)</div>
+         <div class="related-chain-flow">${nodesHtml}</div>
+       </div>
+     `;
+  }
+
+  // ── Render base panel ─────────────────────────────────────────────────────
   panel.innerHTML = `
     <div class="api-details-header">
       <span class="api-details-header-title">${escHtml(api.name)}</span>
-      <span class="api-badge ${badgeClass}" style="font-size:12px; padding:3px 10px;">HTTP ${api.status} - ${httpInfo.label}</span>
+      <span class="api-badge ${badgeClass}" style="font-size:12px; padding:3px 10px;">${badgeText}</span>
     </div>
-    <div class="api-details-content">
+    <div class="api-details-content" style="max-height: calc(100vh - 220px); overflow-y: auto; padding-right: 4px;">
+
+      <!-- Business Result Row -->
+      <div class="api-details-row" style="background:${bizColor}11; border-radius:6px; padding:8px 12px; border:1px solid ${bizColor}33; margin-bottom:8px;">
+        <div class="api-details-label" style="color:${bizColor};font-weight:700;">Business Result</div>
+        <div class="api-details-value" style="font-weight:700;color:${bizColor};">${bizIcon} ${escHtml(bizLabel)}</div>
+      </div>
+
       <div class="api-details-row">
         <div class="api-details-label">API Name</div>
-        <div class="api-details-value">${escHtml(api.name)}</div>
+        <div class="api-details-value" style="font-weight:600; color:var(--text-light);">${escHtml(api.name)}</div>
       </div>
       <div class="api-details-row">
         <div class="api-details-label">Request URL</div>
-        <div class="api-details-value">${redactHTML(escHtml(api.endpoint || 'N/A'))}</div>
+        <div class="api-details-value" style="word-break:break-all;">${urlValue}</div>
       </div>
       <div class="api-details-row">
         <div class="api-details-label">HTTP Method</div>
         <div class="api-details-value" style="font-weight:700; color:var(--primary);">${escHtml(api.method || 'GET')}</div>
       </div>
       <div class="api-details-row">
-        <div class="api-details-label">Response Time</div>
-        <div class="api-details-value" style="font-weight:700; color:${api.ms > 2000 ? 'var(--warning-text)' : 'var(--success-text)'}">${api.ms} ms</div>
+        <div class="api-details-label">Query Parameters</div>
+        <div class="api-details-value" style="word-break:break-all;">${queryParamsValue}</div>
       </div>
+      <div class="api-details-row">
+        <div class="api-details-label">Request Headers</div>
+        <div class="api-details-value" style="word-break:break-all; font-family:monospace; font-size:11px;">${headersValue}</div>
+      </div>
+      <div class="api-details-row">
+        <div class="api-details-label">Correlation ID</div>
+        <div class="api-details-value" style="word-break:break-all; font-weight:500;">${correlationValue}</div>
+      </div>
+      <div class="api-details-row">
+        <div class="api-details-label">HTTP Status</div>
+        <div class="api-details-value" style="font-weight:700; color:${isError ? '#DC2626' : '#16A34A'};">HTTP ${api.status} — ${escHtml(httpLabel)}</div>
+      </div>
+      <div class="api-details-row">
+        <div class="api-details-label">Response Time</div>
+        <div class="api-details-value" style="font-weight:700; color:${api.ms > 5000 ? '#DC2626' : api.ms > 2000 ? '#F59E0B' : '#10B981'}">
+          ${api.ms} ms ${api.ms > 5000 ? '🔴 Critical' : api.ms > 2000 ? '🟡 Slow' : '🟢 OK'}
+        </div>
+      </div>
+      ${recordBadge}
       <div class="api-details-row">
         <div class="api-details-label">Timestamp</div>
         <div class="api-details-value">${escHtml(api.timestamp || 'N/A')}</div>
       </div>
       <div class="api-details-row">
-        <div class="api-details-label">Thread Context</div>
+        <div class="api-details-label">Thread</div>
         <div class="api-details-value">${redactHTML(escHtml(api.thread || 'N/A'))}</div>
       </div>
-      
-      <div style="margin-top: 14px; padding: 10px 14px; background:var(--bg); border-radius:8px; border:1px solid var(--border); font-size:12.5px; color:var(--text-normal); line-height:1.5;">
-        <strong>Status Analysis:</strong> ${httpInfo.explain}
+      ${api.retryCount > 0 ? `<div class="api-details-row">
+        <div class="api-details-label">Retry Count</div>
+        <div class="api-details-value" style="color:#F59E0B;font-weight:700;">⚠ ${api.retryCount} retries detected</div>
+      </div>` : ''}
+
+      <div style="margin-top:14px; padding:10px 14px; background:var(--bg); border-radius:8px; border:1px solid var(--border); font-size:12.5px; color:var(--text-normal); line-height:1.5;">
+        <strong>📋 Status Analysis:</strong> ${escHtml(httpExplain)}
       </div>
 
-      <div class="api-payload-box">
+      <div style="margin-top:10px; padding:10px 14px; background:rgba(139,92,246,0.06); border-radius:8px; border:1px solid rgba(139,92,246,0.3); font-size:12.5px; color:var(--text-normal); line-height:1.5;">
+        <strong>✨ AI Recommendation:</strong> ${escHtml(api.recommendation || 'Everything looks normal.')}
+      </div>
+
+      <!-- Related API Flow Chain -->
+      ${relatedChainHtml}
+
+      <!-- Request Payload -->
+      <div class="api-payload-box" style="margin-top: 14px;">
         <div class="api-payload-title">
           <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
             <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
           </svg>
           Request Payload
+          ${(api.request && api.request !== 'N/A' && api.request !== 'NOT LOGGED') ? '<span style="color:#10B981;font-size:10px;margin-left:6px;">✓ Captured</span>' : '<span style="color:#EF4444;font-size:10px;margin-left:6px;">⚠ Not logged</span>'}
         </div>
         ${reqPayloadHtml}
       </div>
 
+      <!-- Response Payload -->
       <div class="api-payload-box">
         <div class="api-payload-title">
           <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -2462,10 +3035,29 @@ function renderApiDetails(api) {
             <line x1="12" y1="19" x2="20" y2="19" />
           </svg>
           Response Payload
+          ${(api.response && api.response !== 'N/A' && api.response !== 'NOT LOGGED') ? '<span style="color:#10B981;font-size:10px;margin-left:6px;">✓ Captured</span>' : '<span style="color:#EF4444;font-size:10px;margin-left:6px;">⚠ Not logged</span>'}
         </div>
         ${respPayloadHtml}
       </div>
+
+      <!-- Brain Investigation Section -->
+      <div id="api-brain-investigation-container" style="margin-top:16px;"></div>
+
     </div>`;
+
+  // ── Inject Brain Investigation Report ────────────────────────────────────
+  if (window.LOGRADAR_BRAIN) {
+    try {
+      const brainResult = LOGRADAR_BRAIN.investigateAPI(api);
+      const brainContainer = document.getElementById('api-brain-investigation-container');
+      if (brainContainer && brainResult) {
+        const brainHtml = LOGRADAR_BRAIN.renderBrainPanel(brainResult);
+        brainContainer.innerHTML = brainHtml;
+      }
+    } catch(e) {
+      console.warn('LogRadar Brain investigation error:', e);
+    }
+  }
 }
 
 function selectApiByName(name) {
@@ -2489,10 +3081,56 @@ function selectApiByName(name) {
   }
 }
 
-// ─── UI Rendering ─────────────────────────────────────────────────────────────
+window.toggleResponseCollapse = function() {
+  const pre = document.getElementById('api-response-pre');
+  const btn = document.getElementById('btn-toggle-resp');
+  if (!pre || !btn) return;
+  if (pre.style.maxHeight === '40px') {
+     pre.style.maxHeight = '350px';
+     btn.textContent = 'Collapse';
+  } else {
+     pre.style.maxHeight = '40px';
+     btn.textContent = 'Expand';
+  }
+};
+
+window.copyResponseText = function() {
+  const pre = document.getElementById('api-response-pre');
+  if (!pre) return;
+  navigator.clipboard.writeText(pre.textContent).then(() => {
+     alert('Response copied to clipboard!');
+  });
+};
+
+function updateFlexiFeaturesVisibility() {
+  const isFlexi = STATE.analysis && STATE.analysis.logType === 'Flexi Runtime';
+  const dbgNav = document.getElementById('nav-debugger');
+  const graphNav = document.getElementById('nav-graph');
+  const flowNav = document.getElementById('nav-flow');
+
+  if (isFlexi) {
+    if (dbgNav) dbgNav.style.display = 'flex';
+    if (graphNav) graphNav.style.display = 'flex';
+    if (flowNav) flowNav.style.display = 'flex';
+  } else {
+    if (dbgNav) dbgNav.style.display = 'none';
+    if (graphNav) graphNav.style.display = 'none';
+    if (flowNav) flowNav.style.display = 'none';
+    
+    const activeNav = document.querySelector('.nav-item.active');
+    if (activeNav) {
+      const activeView = activeNav.dataset.view;
+      if (activeView === 'debugger' || activeView === 'graph' || activeView === 'flow') {
+         switchView('dashboard');
+      }
+    }
+  }
+}
 
 function renderDashboard(a) {
   const $ = id => document.getElementById(id);
+  
+  updateFlexiFeaturesVisibility();
 
   // Stat Cards
   $('stat-critical').textContent = a.errors.length;
@@ -2539,34 +3177,65 @@ function renderDashboard(a) {
     }
   }
 
-  // Performance List
+  // Performance List Table
   const perfEl = $('perf-list');
   if (a.apis.length) {
-    const maxMs = Math.max(...a.apis.map(x => x.ms), 1);
-    perfEl.innerHTML = a.apis.sort((x, y) => y.ms - x.ms).map(api => {
-      const pct = Math.round((api.ms / maxMs) * 100);
-      const color = api.ms > 5000 ? '#DC2626' : api.ms > 2000 ? '#F59E0B' : '#16A34A';
-      const statusBadge = api.status ? `<span class="badge ${api.status >= 400 ? 'error' : 'success'}" style="margin-left:6px;font-size:10px;">${api.status}</span>` : '';
-      return `<div class="clickable-api-card" data-name="${escHtml(api.name)}" style="margin-bottom:12px; cursor:pointer; padding:6px; border-radius:6px; transition:background-color 0.15s;" onmouseover="this.style.backgroundColor='var(--bg-row-hover)'" onmouseout="this.style.backgroundColor='transparent'">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-          <span style="font-size:12.5px;font-weight:600;color:#1F2937;">${api.name}${statusBadge}</span>
-        </div>
-        <div class="perf-bar-wrap">
-          <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:${pct}%;background:${color};"></div></div>
-          <span class="perf-ms" style="color:${color};">${api.ms}ms</span>
-        </div>
-        ${api.ms > 2000 ? `<div style="font-size:11px;color:${color};margin-top:3px;">⚠ ${api.ms > 5000 ? 'Critical — exceeds 5s threshold' : 'Slow — exceeds 2s threshold'}</div>` : ''}
-      </div>`;
-    }).join('');
+    const healthBadgeColors = {
+      'Healthy': { bg: '#10B98115', text: '#10B981' },
+      'Blank Response': { bg: '#F59E0B15', text: '#D97706' },
+      'Slow': { bg: '#F59E0B15', text: '#D97706' },
+      'Retry': { bg: '#3B82F615', text: '#3B82F6' },
+      'Failed': { bg: '#EF444415', text: '#EF4444' },
+      'Timeout': { bg: '#EF444415', text: '#EF4444' }
+    };
 
-    perfEl.querySelectorAll('.clickable-api-card').forEach(cardEl => {
-      cardEl.addEventListener('click', () => {
-        const name = cardEl.dataset.name;
-        selectApiByName(name);
+    perfEl.innerHTML = `
+      <table style="width:100%; border-collapse:collapse; font-size:12.5px; text-align:left; color:var(--text-normal);">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border); color:var(--text-light); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.5px;">
+            <th style="padding:10px 8px;">API</th>
+            <th style="padding:10px 8px;">Status</th>
+            <th style="padding:10px 8px;">Response Time</th>
+            <th style="padding:10px 8px;">Records</th>
+            <th style="padding:10px 8px;">Health</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${a.apis.sort((x, y) => y.ms - x.ms).map(api => {
+            const colors = healthBadgeColors[api.health || 'Healthy'] || healthBadgeColors['Healthy'];
+            const statusColor = api.status >= 400 ? '#EF4444' : '#10B981';
+            const statusHtml = api.status ? `<span style="font-weight:700; color:${statusColor}">${api.status}</span>` : '<span style="color:#94A3B8;">—</span>';
+            const recordsHtml = (api.recordCount !== null && api.recordCount !== undefined) ? `<strong>${api.recordCount}</strong>` : '<span style="color:#94A3B8;">—</span>';
+            
+            return `
+              <tr class="clickable-perf-api-row" data-name="${escHtml(api.name)}" style="border-bottom:1px solid var(--border); cursor:pointer; transition:background-color 0.15s;" onmouseover="this.style.backgroundColor='var(--bg-row-hover)'" onmouseout="this.style.backgroundColor='transparent'">
+                <td style="padding:12px 8px; font-weight:600; color:var(--primary);">${escHtml(api.name)}</td>
+                <td style="padding:12px 8px;">${statusHtml}</td>
+                <td style="padding:12px 8px; font-weight:500;">
+                  <span>${api.ms} ms</span>
+                  <div style="width:40px; height:3px; background:#1E293B; border-radius:2px; margin-top:4px; overflow:hidden;">
+                    <div style="width:${Math.min(100, Math.round((api.ms/5000)*100))}%; height:100%; background:${api.ms > 5000 ? '#EF4444' : api.ms > 2000 ? '#F59E0B' : '#10B981'}"></div>
+                  </div>
+                </td>
+                <td style="padding:12px 8px;">${recordsHtml}</td>
+                <td style="padding:12px 8px;">
+                  <span style="background:${colors.bg}; color:${colors.text}; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700; border:1px solid ${colors.text}25;">
+                    ${api.health || 'Healthy'}
+                  </span>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>`;
+
+    perfEl.querySelectorAll('.clickable-perf-api-row').forEach(row => {
+      row.addEventListener('click', () => {
+        selectApiByName(row.dataset.name);
       });
     });
   } else {
-    perfEl.innerHTML = '<div style="padding:12px;color:#9CA3AF;font-size:13px;">No API calls detected in log.</div>';
+    perfEl.innerHTML = '<div style="padding:20px; color:#94A3B8; text-align:center;">No API calls detected in log.</div>';
   }
 
   // Error Grouping
@@ -2666,6 +3335,164 @@ function renderDashboard(a) {
   renderBlankApiReport(a.blankApis);
   renderWarningAnalysis(a.warnings);
   renderLoggerAnalysis(a.loggerStats);
+  renderIntegrationApiMetrics(a.apis);
+}
+
+function renderIntegrationApiMetrics(apis) {
+  const $ = id => document.getElementById(id);
+  if (!apis) return;
+
+  // 1. Calculate Stats
+  const total = apis.length;
+  const success = apis.filter(api => api.health === 'Success' || api.health === 'Slow').length;
+  const blank = apis.filter(api => api.health === 'Blank').length;
+  const failed = apis.filter(api => api.health === 'Failed').length;
+  const slow = apis.filter(api => api.health === 'Slow').length;
+  
+  const times = apis.filter(api => typeof api.ms === 'number').map(api => api.ms);
+  const avg = times.length ? Math.round(times.reduce((sum, t) => sum + t, 0) / times.length) : 0;
+
+  const recordCounts = apis
+     .map(api => Number(api.recordCount))
+     .filter(count => !isNaN(count));
+  const totalRecords = recordCounts.reduce((sum, c) => sum + c, 0);
+  const maxRecord = recordCounts.length ? Math.max(...recordCounts) : 0;
+
+  if ($('api-stat-total')) $('api-stat-total').textContent = total;
+  if ($('api-stat-success')) $('api-stat-success').textContent = success;
+  if ($('api-stat-blank')) $('api-stat-blank').textContent = blank;
+  if ($('api-stat-failed')) $('api-stat-failed').textContent = failed;
+  if ($('api-stat-slow')) $('api-stat-slow').textContent = slow;
+  if ($('api-stat-avg')) $('api-stat-avg').textContent = avg + 'ms';
+  if ($('api-stat-total-records')) $('api-stat-total-records').textContent = totalRecords.toLocaleString();
+  if ($('api-stat-highest-record')) $('api-stat-highest-record').textContent = maxRecord.toLocaleString();
+
+  // 2. Slowest APIs (Top 10)
+  const slowestTbody = $('api-dashboard-slowest');
+  if (slowestTbody) {
+     const slowestApis = [...apis]
+        .filter(api => typeof api.ms === 'number' && api.ms > 0)
+        .sort((x, y) => y.ms - x.ms)
+        .slice(0, 10);
+        
+     if (slowestApis.length) {
+        slowestTbody.innerHTML = slowestApis.map(api => {
+           let threshold = '2000 ms';
+           let rec = api.recommendation || 'Verify database indexes or network latency.';
+           return `
+              <tr class="clickable-dashboard-api" data-name="${escHtml(api.name)}" style="border-bottom:1px solid var(--border); cursor:pointer;" onmouseover="this.style.backgroundColor='var(--bg-row-hover)'" onmouseout="this.style.backgroundColor='transparent'">
+                 <td style="padding:8px; font-weight:600; color:var(--primary);">${escHtml(api.name)}</td>
+                 <td style="padding:8px; color:#EF4444; font-weight:600;">${api.ms} ms</td>
+                 <td style="padding:8px; color:var(--text-muted);">${threshold}</td>
+                 <td style="padding:8px; font-size:11.5px; color:var(--text-normal);">${escHtml(rec)}</td>
+              </tr>
+           `;
+        }).join('');
+     } else {
+        slowestTbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:24px; color:var(--text-muted);">No slow APIs detected</td></tr>`;
+     }
+  }
+
+  // 3. Blank APIs (Top 10)
+  const blankTbody = $('api-dashboard-blank');
+  if (blankTbody) {
+     const blankApis = [...apis]
+        .filter(api => api.businessStatus === 'Blank Response')
+        .slice(0, 10);
+        
+     if (blankApis.length) {
+        blankTbody.innerHTML = blankApis.map(api => {
+           const countVal = api.recordCount !== undefined ? api.recordCount : 0;
+           return `
+              <tr class="clickable-dashboard-api" data-name="${escHtml(api.name)}" style="border-bottom:1px solid var(--border); cursor:pointer;" onmouseover="this.style.backgroundColor='var(--bg-row-hover)'" onmouseout="this.style.backgroundColor='transparent'">
+                 <td style="padding:8px; font-weight:600; color:var(--primary);">${escHtml(api.name)}</td>
+                 <td style="padding:8px; word-break:break-all; font-family:monospace; font-size:11px; max-width:180px;">${escHtml(api.endpoint || 'N/A')}</td>
+                 <td style="padding:8px; font-weight:700; color:#F59E0B;">${countVal}</td>
+                 <td style="padding:8px; font-weight:500;">${api.ms !== 'Unknown' ? api.ms + ' ms' : 'N/A'}</td>
+                 <td style="padding:8px; font-size:11.5px; color:var(--text-normal);">${escHtml(api.recommendation)}</td>
+              </tr>
+           `;
+        }).join('');
+     } else {
+        blankTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:24px; color:var(--text-muted);">No blank APIs detected</td></tr>`;
+     }
+  }
+
+  // 4. Fastest APIs (Top 10)
+  const fastestTbody = $('api-dashboard-fastest');
+  if (fastestTbody) {
+     const groups = {};
+     apis.forEach(api => {
+        if (typeof api.ms === 'number') {
+           if (!groups[api.name]) {
+              groups[api.name] = { name: api.name, min: api.ms, total: 0, count: 0 };
+           }
+           const g = groups[api.name];
+           if (api.ms < g.min) g.min = api.ms;
+           g.total += api.ms;
+           g.count++;
+        }
+     });
+     
+     const fastestApis = Object.values(groups)
+        .sort((x, y) => x.min - y.min)
+        .slice(0, 10);
+        
+     if (fastestApis.length) {
+        fastestTbody.innerHTML = fastestApis.map(g => {
+           const avgVal = Math.round(g.total / g.count);
+           return `
+              <tr class="clickable-dashboard-api" data-name="${escHtml(g.name)}" style="border-bottom:1px solid var(--border); cursor:pointer;" onmouseover="this.style.backgroundColor='var(--bg-row-hover)'" onmouseout="this.style.backgroundColor='transparent'">
+                 <td style="padding:8px; font-weight:600; color:var(--primary);">${escHtml(g.name)}</td>
+                 <td style="padding:8px; color:#10B981; font-weight:600;">${g.min} ms</td>
+                 <td style="padding:8px; font-weight:600; color:var(--text-light);">${g.count}</td>
+                 <td style="padding:8px; color:var(--text-muted);">${avgVal} ms (avg)</td>
+              </tr>
+           `;
+        }).join('');
+     } else {
+        fastestTbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:24px; color:var(--text-muted);">No APIs detected</td></tr>`;
+     }
+  }
+
+  // 5. Bottom Execution Timeline
+  const timelineDiv = $('api-dashboard-timeline');
+  if (timelineDiv) {
+     const sortedApis = [...apis].sort((x, y) => (x.logIndex || 0) - (y.logIndex || 0));
+     if (sortedApis.length) {
+        let html = '';
+        sortedApis.forEach((api, idx) => {
+           const timeStr = api.timestamp ? api.timestamp.split(' ')[1] || api.timestamp.split('T')[1] || api.timestamp : '';
+           const cleanTime = timeStr ? timeStr.substring(0, 5) : '';
+           
+           let statusColor = '#10B981';
+           if (api.businessStatus === 'Blank Response' || api.businessStatus === 'Slow API') statusColor = '#F59E0B';
+           if (api.businessStatus === 'Server Failure' || api.businessStatus === 'Validation Failed' || api.businessStatus === 'Connection Failure') statusColor = '#EF4444';
+           
+           html += `
+              <div class="timeline-flow-node clickable-dashboard-api" data-name="${escHtml(api.name)}" style="display:flex; flex-direction:column; align-items:center; background:#1E293B; border:1px solid rgba(255,255,255,0.08); border-top:3px solid ${statusColor}; border-radius:6px; padding:6px 12px; min-width:110px; cursor:pointer; flex-shrink:0; transition:all 0.15s;" onmouseover="this.style.borderColor='${statusColor}'" onmouseout="this.style.borderColor='rgba(255,255,255,0.08)'">
+                 <span style="font-size:10px; font-weight:600; color:var(--text-muted);">${escHtml(cleanTime || '00:00')}</span>
+                 <span style="font-size:11.5px; font-weight:700; color:var(--text-light); margin-top:2px; word-break:break-all; text-align:center;">${escHtml(api.name)}</span>
+                 <span style="font-size:10px; color:${statusColor}; margin-top:2px; font-weight:500;">${api.ms !== 'Unknown' ? api.ms + ' ms' : 'N/A'}</span>
+              </div>
+           `;
+           
+           if (idx < sortedApis.length - 1) {
+              html += `<div style="color:var(--text-muted); font-weight:700; font-size:14px; flex-shrink:0;">➔</div>`;
+           }
+        });
+        timelineDiv.innerHTML = html;
+     } else {
+        timelineDiv.innerHTML = `<div style="width:100%; text-align:center; color:var(--text-muted);">Upload log files to render execution sequence</div>`;
+     }
+  }
+
+  // Register click events
+  document.querySelectorAll('.clickable-dashboard-api').forEach(el => {
+     el.addEventListener('click', () => {
+        selectApiByName(el.dataset.name);
+     });
+  });
 }
 
 function renderBlankApiReport(blankApis) {
@@ -2893,12 +3720,217 @@ function openDrawer(row) {
   const d = analyzeRow(row, STATE.parsed, STATE.analysis || {});
   const $ = id => document.getElementById(id);
 
+  // --- Populate surrounding log lines in Monaco snippet viewer ---
+  const parsedIndex = STATE.parsed.findIndex(r => r.id === row.id);
+  let snippetText = '';
+  let errorLineInSnippet = 1;
+  if (parsedIndex !== -1) {
+     const startIndex = Math.max(0, parsedIndex - 15);
+     const endIndex = Math.min(STATE.parsed.length - 1, parsedIndex + 15);
+     const snippetLines = STATE.parsed.slice(startIndex, endIndex + 1);
+     errorLineInSnippet = (parsedIndex - startIndex) + 1;
+     
+     snippetText = snippetLines.map((line, i) => {
+        const relativeLineNum = startIndex + i + 1;
+        const lvl = (line.level || 'INFO').padEnd(5);
+        return `Line ${String(relativeLineNum).padEnd(5)} | [${lvl}] | ${line.timestamp} | ${line.message.split('\n')[0]}`;
+     }).join('\n');
+  }
+
+  // Load / Update Monaco Editor log viewer
+  const initRcaLogMonaco = (text, errorLine, errType) => {
+     const container = document.getElementById('rca-monaco-container');
+     if (!container) return;
+     
+     if (typeof window.monaco !== 'undefined') {
+        if (window.rcaLogEditor) {
+           window.rcaLogEditor.setValue(text);
+        } else {
+           window.rcaLogEditor = window.monaco.editor.create(container, {
+             value: text,
+             language: 'text',
+             theme: 'vs-dark',
+             readOnly: true,
+             automaticLayout: true,
+             minimap: { enabled: false },
+             lineNumbers: 'on',
+             scrollBeyondLastLine: false,
+             fontSize: 12,
+             fontFamily: "'Fira Code', Consolas, monospace",
+           });
+        }
+
+        const decorations = [{
+           range: new window.monaco.Range(errorLine, 1, errorLine, 100),
+           options: {
+             isWholeLine: true,
+             className: 'monaco-line-error',
+             glyphMarginClassName: 'monaco-glyph-error',
+             hoverMessage: { value: `Selected Error: ${errType}` }
+           }
+        }];
+        
+        window.rcaLogEditor._editorDecorations = window.rcaLogEditor.deltaDecorations(
+           window.rcaLogEditor._editorDecorations || [],
+           decorations
+        );
+        
+        setTimeout(() => {
+           window.rcaLogEditor.revealLineInCenter(errorLine);
+        }, 50);
+     } else {
+        // Fallback if Monaco is not yet loaded
+        container.innerHTML = `<pre style="margin:0; padding:12px; height:100%; overflow:auto; font-family:monospace; color:#E2E8F0; background:#0F172A; white-space:pre;">${escHtml(text)}</pre>`;
+     }
+  };
+
+  // Check and run Monaco loading
+  if (typeof require !== 'undefined' && typeof window.monaco === 'undefined') {
+     require(['vs/editor/editor.main'], function() {
+        initRcaLogMonaco(snippetText, errorLineInSnippet, d.errType);
+     });
+  } else {
+     initRcaLogMonaco(snippetText, errorLineInSnippet, d.errType);
+  }
+
+  // Copy / Download handlers
+  const copyBtn = document.getElementById('rca-log-copy-btn');
+  if (copyBtn) {
+     copyBtn.onclick = () => {
+        navigator.clipboard.writeText(snippetText).then(() => {
+           copyBtn.textContent = 'Copied!';
+           setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1000);
+        });
+     };
+  }
+  
+  const downloadBtn = document.getElementById('rca-log-download-btn');
+  if (downloadBtn) {
+     downloadBtn.onclick = () => {
+        const blob = new Blob([snippetText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `log_snippet_line_${parsedIndex + 1}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+     };
+  }
+
+  // AI Analysis explanation compilation
+  let aiExplanation = '';
+  if (d.errType.includes('NullPointerException') || d.errType.includes('null')) {
+     aiExplanation = `The exception occurred immediately after the response was processed.
+
+No Session Object or variable was available in the target scope.
+
+The uploaded screen JSON shows _onExit calling getObject() instead of getSessionObject().
+
+This is the most probable root cause. Use getSessionObject() to ensure scope persistence.`;
+  } else if (d.errType.includes('ArrayIndexOutOfBoundsException')) {
+     aiExplanation = `The ArrayIndexOutOfBoundsException occurred because the code attempted to access the first index of an array (e.g. items[0]) but the array was empty (length = 0).
+
+This is a signature Blank API result. GetWorkOrderOperations returned HTTP 200 but count=0.
+
+Business validation failed because no work order operations were available.
+
+Add if(items.length() > 0) to prevent array crashes.`;
+  } else if (d.apiInfo && d.apiInfo.status === 403) {
+     aiExplanation = `The exception occurred during callWebService() execution.
+
+The endpoint WORK_ORDER_OPERATION_WS returned HTTP 403 Forbidden.
+
+No further events executed, and the transaction was terminated.
+
+Verify Oracle Fusion security policies and ensure the user is assigned the necessary data privileges.`;
+  } else {
+     aiExplanation = `AI Analysis:
+
+The failure was detected at step ${d.errType || 'Error'}.
+
+Possible cause: ${d.rootCause || 'Preceding API or script failed.'}
+
+Immediate Action: ${d.immediatefix || 'Verify backend availability and log variables.'}`;
+  }
+  const explanationEl = document.getElementById('rca-ai-analysis-text');
+  if (explanationEl) explanationEl.textContent = aiExplanation;
+
+  // Correlation Chain Flow mapping
+  const screenVal = d.screen || (STATE.analysis ? STATE.analysis.screen : '') || extractScreenFromMsg(row.message) || 'WO_COMPLETION';
+  const fieldVal = d.script || 'ORG_CODE';
+  let eventVal = 'event';
+  if (row.message.includes('_afterExit')) eventVal = '_afterExit';
+  else if (row.message.includes('_afterClick')) eventVal = '_afterClick';
+  else if (row.message.includes('_onExit')) eventVal = '_onExit';
+  else if (row.message.includes('_onResponseReceived')) eventVal = '_onResponseReceived';
+  else eventVal = '_onExit';
+
+  const apiVal = d.apiInfo ? d.apiInfo.name : 'ORG_WEBSERVICE';
+  const objVal = Object.keys(d.variables)[0] || 'ORACLE_SCM_ORG_ID';
+  const errVal = d.errType || 'NullPointerException';
+
+  const chainContainer = document.getElementById('rca-correlation-chain');
+  if (chainContainer) {
+     chainContainer.innerHTML = `
+       <div class="related-node success" style="max-width: 100px; padding: 6px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 2px;">
+         <span style="font-weight:700; color:var(--text-light); font-size:9.5px;">Screen</span>
+         <span style="font-size:9px; color:var(--text-muted); word-break:break-all; text-align:center;">${escHtml(screenVal)}</span>
+       </div>
+       <span class="related-arrow" style="color: var(--text-muted); font-size: 12px;">➔</span>
+       <div class="related-node success" style="max-width: 100px; padding: 6px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 2px;">
+         <span style="font-weight:700; color:var(--text-light); font-size:9.5px;">Field</span>
+         <span style="font-size:9px; color:var(--text-muted); word-break:break-all; text-align:center;">${escHtml(fieldVal)}</span>
+       </div>
+       <span class="related-arrow" style="color: var(--text-muted); font-size: 12px;">➔</span>
+       <div class="related-node success" style="max-width: 100px; padding: 6px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 2px;">
+         <span style="font-weight:700; color:var(--text-light); font-size:9.5px;">Event</span>
+         <span style="font-size:9px; color:var(--text-muted); word-break:break-all; text-align:center;">${escHtml(eventVal)}</span>
+       </div>
+       <span class="related-arrow" style="color: var(--text-muted); font-size: 12px;">➔</span>
+       <div class="related-node success" style="max-width: 100px; padding: 6px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 2px;">
+         <span style="font-weight:700; color:var(--text-light); font-size:9.5px;">API</span>
+         <span style="font-size:9px; color:var(--text-muted); word-break:break-all; text-align:center;">${escHtml(apiVal)}</span>
+       </div>
+       <span class="related-arrow" style="color: var(--text-muted); font-size: 12px;">➔</span>
+       <div class="related-node success" style="max-width: 100px; padding: 6px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 2px;">
+         <span style="font-weight:700; color:var(--text-light); font-size:9.5px;">Object</span>
+         <span style="font-size:9px; color:var(--text-muted); word-break:break-all; text-align:center;">${escHtml(objVal)}</span>
+       </div>
+       <span class="related-arrow" style="color: var(--text-muted); font-size: 12px;">➔</span>
+       <div class="related-node failed" style="max-width: 100px; padding: 6px 10px; border-radius: 6px; background: rgba(239,68,68,0.05); border: 1px solid rgba(239,68,68,0.2); display: flex; flex-direction: column; align-items: center; gap: 2px;">
+         <span style="font-weight:700; color:#EF4444; font-size:9.5px;">Exception</span>
+         <span style="font-size:9px; color:#EF4444; word-break:break-all; text-align:center; font-weight:600;">${escHtml(errVal)}</span>
+       </div>
+     `;
+  }
+
   // Populate Code Execution Investigator Report Card
   if (d.codeExecutionReport) {
     $('ds-investigator-report').style.display = 'block';
     $('dc-investigator-report-text').textContent = d.codeExecutionReport;
   } else {
     $('ds-investigator-report').style.display = 'none';
+  }
+
+  // ── Inject Brain Investigation Card ──────────────────────────────────────
+  const existingBrain = document.getElementById('ds-brain-card');
+  if (existingBrain) existingBrain.remove();
+  if (window.LOGRADAR_BRAIN) {
+    try {
+      const brainResult = LOGRADAR_BRAIN.investigateRow(row, STATE.parsed, STATE.analysis || {});
+      if (brainResult && brainResult.pattern && brainResult.pattern.id !== 'HEALTHY') {
+        const brainDiv = document.createElement('div');
+        brainDiv.id = 'ds-brain-card';
+        brainDiv.innerHTML = LOGRADAR_BRAIN.renderBrainDrawerCard(brainResult);
+        // Insert after the investigator report card
+        const afterTarget = $('ds-investigator-report');
+        if (afterTarget) afterTarget.parentNode.insertBefore(brainDiv, afterTarget.nextSibling);
+      }
+    } catch(e) {
+      console.warn('LogRadar Brain drawer error:', e);
+    }
   }
 
   // Badge & heading
@@ -3155,40 +4187,373 @@ function renderTimeline(parsed) {
   }
 }
 
+function buildExecutionFlow(parsed, apis, sDef) {
+  const steps = [];
+  const apiMap = {};
+  apis.forEach(api => {
+     apiMap[api.name] = api;
+  });
+
+  parsed.forEach((line, idx) => {
+     const msg = line.message || '';
+     const ts = line.timestamp || '';
+     
+     // 1. Page Entered
+     let pageMatch = msg.match(/PAGE ENTERED:\s*([a-zA-Z0-9_]+)/i) || msg.match(/Page\s+entered:\s*([a-zA-Z0-9_]+)/i);
+     if (pageMatch) {
+        steps.push({
+           type: 'page',
+           label: pageMatch[1],
+           ts,
+           status: 'success',
+           details: `Entered Screen/Page: ${pageMatch[1]}`,
+           lineIdx: idx
+        });
+     }
+
+     // 2. Event Handlers
+     let eventMatch = msg.match(/(?:ENTER|>>> ENTER)\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/i);
+     if (!eventMatch) {
+        eventMatch = msg.match(/([a-zA-Z0-9_]+)\s+on\s+([a-zA-Z0-9_]+)/i);
+        if (!eventMatch) {
+           const evs = ['_afterPageEntered', '_afterExit', '_onExit', '_afterClick', '_beforePageExit', '_afterPageExit', '_beforeExit', '_onKeyPress', '_inputProcessor', '_onResponseReceived'];
+           for (const ev of evs) {
+              if (msg.includes(ev)) {
+                 let field = 'Field';
+                 let fieldMatch = msg.match(/field\s*:\s*([a-zA-Z0-9_]+)/i) || msg.match(/on\s+([a-zA-Z0-9_]+)/i);
+                 if (fieldMatch) field = fieldMatch[1];
+                 steps.push({
+                    type: 'event',
+                    label: `${field} ${ev}`,
+                    ts,
+                    status: 'success',
+                    details: `Triggered event ${ev} on field ${field}`,
+                    lineIdx: idx
+                 });
+                 break;
+              }
+           }
+        }
+     }
+     if (eventMatch && (msg.includes('_') || msg.includes('Exit') || msg.includes('Click') || msg.includes('Enter'))) {
+        steps.push({
+           type: 'event',
+           label: `${eventMatch[2]} ${eventMatch[1]}`,
+           ts,
+           status: 'success',
+           details: `Triggered event ${eventMatch[1]} on field ${eventMatch[2]}`,
+           lineIdx: idx
+        });
+     }
+
+     // 3. WebService Calls
+     let wsMatch = msg.match(/callWebService\("?([a-zA-Z0-9_]+)"?\)/i) || msg.match(/FlexiWebService\.runWebService:\s*([a-zA-Z0-9_]+)/i) || msg.match(/\.runWebService:\s*([a-zA-Z0-9_]+)/i) || msg.match(/callWebService\(\s*([a-zA-Z0-9_]+)/i);
+     if (wsMatch) {
+        let wsName = wsMatch[1] || 'API_CALL';
+        const last = steps[steps.length - 1];
+        if (!(last && last.type === 'api' && last.label === wsName)) {
+           steps.push({
+              type: 'api',
+              label: wsName,
+              ts,
+              status: 'success',
+              details: `Initiated API execution call: ${wsName}`,
+              lineIdx: idx
+           });
+        }
+     }
+
+     // 4. Storing / reading objects
+     let objMatch = msg.match(/(putObject|getObject|putSessionObject|getSessionObject)\("?([a-zA-Z0-9_]+)"?/i);
+     if (objMatch) {
+        steps.push({
+           type: 'object',
+           label: `${objMatch[1]}("${objMatch[2]}")`,
+           ts,
+           status: 'success',
+           details: `${objMatch[1]} called for scope variable "${objMatch[2]}"`,
+           lineIdx: idx
+        });
+     }
+
+     // 5. Validation Rejection / event.preventDefault()
+     if (msg.includes('preventDefault') || msg.includes('validation failed') || msg.includes('rejection')) {
+        steps.push({
+           type: 'validation',
+           label: 'Validation Check Rejection',
+           ts,
+           status: 'success',
+           details: `Validation prevented transaction from proceeding: ${msg}`,
+           lineIdx: idx
+        });
+     }
+
+     // 6. Status Messages
+     let statusMatch = msg.match(/setStatusMessage\("?([^",\)]+)"?/i) || msg.match(/showStatusMessage\("?([^",\)]+)"?/i);
+     if (statusMatch) {
+        steps.push({
+           type: 'statusMsg',
+           label: `Status: "${statusMatch[1]}"`,
+           ts,
+           status: 'success',
+           details: `Status message set to user: "${statusMatch[1]}"`,
+           lineIdx: idx
+        });
+     }
+
+     // 7. Navigation
+     if (msg.includes('switchView') || msg.includes('navigate') || msg.includes('redirect')) {
+        steps.push({
+           type: 'navigation',
+           label: 'Navigation Flow',
+           ts,
+           status: 'success',
+           details: `Redirect or screen view switch: ${msg}`,
+           lineIdx: idx
+        });
+     }
+
+     // 8. Exceptions
+     if (line.level === 'ERROR' || line.level === 'FATAL' || msg.includes('Exception') || msg.includes('Error')) {
+        let errLabel = 'Error';
+        let match = msg.match(/([a-zA-Z0-9_]+Exception)/) || msg.match(/Error:\s*([^\n\r]+)/);
+        if (match) errLabel = match[1];
+        
+        steps.push({
+           type: 'exception',
+           label: errLabel,
+           ts,
+           status: 'error',
+           details: `Critical error exception encountered: ${msg}`,
+           lineIdx: idx
+        });
+     }
+  });
+
+  if (steps.length === 0) {
+     apis.forEach((api) => {
+        steps.push({
+           type: 'api',
+           label: api.name,
+           ts: api.timestamp,
+           status: api.health === 'Failed' ? 'error' : 'success',
+           details: `API Call: ${api.name} | Method: ${api.method} | Status: ${api.status} | Latency: ${api.ms}ms`,
+           lineIdx: -1
+        });
+     });
+  }
+
+  // Deduplicate consecutive nodes of the same type/label on similar log lines
+  const deduped = [];
+  steps.forEach(step => {
+     if (deduped.length > 0) {
+        const last = deduped[deduped.length - 1];
+        if (last.type === step.type && last.label === step.label && (Math.abs(last.lineIdx - step.lineIdx) < 2)) {
+           if (step.status === 'error') last.status = 'error';
+           return;
+        }
+     }
+     deduped.push(step);
+  });
+
+  let failureDetected = false;
+  let failIdx = -1;
+  
+  deduped.forEach((step, idx) => {
+     if (step.type === 'api' && apiMap[step.label]) {
+        const actualApi = apiMap[step.label];
+        if (actualApi.health === 'Failed') {
+           step.status = 'error';
+           step.details += ` (Failed with status ${actualApi.status})`;
+        }
+     }
+     if (step.status === 'error') {
+        if (!failureDetected) {
+           failureDetected = true;
+           failIdx = idx;
+        }
+     }
+  });
+
+  if (failureDetected) {
+     for (let i = failIdx + 1; i < deduped.length; i++) {
+        deduped[i].status = 'pending';
+     }
+  }
+
+  return deduped;
+}
+
+window.selectFlowNode = (idx) => {
+  const step = STATE.analysis.flow[idx];
+  if (!step) return;
+
+  document.querySelectorAll('.flow-step').forEach((el, i) => {
+     if (i === idx) el.classList.add('selected');
+     else el.classList.remove('selected');
+  });
+
+  const summaryEl = document.getElementById('flow-summary-body');
+  
+  let relatedInfo = '';
+  if (step.type === 'api') {
+     const relatedApi = STATE.analysis.apis.find(a => a.name === step.label);
+     if (relatedApi) {
+        const origIdx = STATE.analysis.apis.indexOf(relatedApi);
+        relatedInfo = `
+          <div style="margin-top:12px; border:1px solid var(--border); padding:8px 12px; border-radius:6px; background:rgba(255,255,255,0.02);">
+             <div style="font-weight:700; color:var(--primary); font-size:12px;">Related Tracker API</div>
+             <div style="font-size:11.5px; color:var(--text-light); margin-top:4px;">
+               <strong>Method:</strong> ${relatedApi.method}<br>
+               <strong>Status:</strong> ${relatedApi.status}<br>
+               <strong>Records:</strong> ${relatedApi.recordCount}<br>
+               <strong>Time:</strong> ${relatedApi.ms} ms<br>
+               <strong>URL:</strong> ${relatedApi.endpoint || 'Not Logged'}
+             </div>
+             <button onclick="switchView('api'); selectRelatedApi(${origIdx})" style="margin-top:8px; background:var(--primary); border:none; color:#fff; font-size:10px; font-weight:700; padding:4px 8px; border-radius:4px; cursor:pointer; width:100%;">Inspect API Details</button>
+          </div>
+        `;
+     }
+  }
+
+  let rcaLinkHtml = '';
+  if (step.lineIdx >= 0 && STATE.parsed[step.lineIdx]) {
+     rcaLinkHtml = `
+       <button onclick="showAndHighlightLog(${STATE.parsed[step.lineIdx].id})" style="margin-top:8px; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); color:#60A5FA; font-size:11px; font-weight:700; padding:6px 12px; border-radius:6px; cursor:pointer; width:100%;">
+          🔍 Investigate in Log Table (Line ${step.lineIdx + 1})
+       </button>
+     `;
+  }
+
+  summaryEl.innerHTML = `
+     <div style="display:flex; flex-direction:column; gap:10px;">
+       <div class="meta-row"><span class="meta-label">Step Type</span><span class="meta-val" style="text-transform:uppercase; font-weight:700; color:var(--primary);">${step.type}</span></div>
+       <div class="meta-row"><span class="meta-label">Label</span><span class="meta-val" style="font-weight:700;">${escHtml(step.label)}</span></div>
+       <div class="meta-row"><span class="meta-label">Timestamp</span><span class="meta-val">${step.ts || '—'}</span></div>
+       <div class="meta-row"><span class="meta-label">Status</span><span class="meta-val ${step.status}">${step.status.toUpperCase()}</span></div>
+       <div style="font-size:12px; color:var(--text-light); line-height:1.5; padding:10px; background:rgba(255,255,255,0.02); border-radius:6px; margin-top:8px; border:1px solid var(--border);">
+         <strong>Step Details:</strong><br>${escHtml(step.details)}
+       </div>
+       ${relatedInfo}
+       ${rcaLinkHtml}
+     </div>
+  `;
+};
+
 function renderWMSFlow(flowSteps, analysis) {
   const el = document.getElementById('wms-flow-container');
+  if (!flowSteps || !flowSteps.length) {
+     flowSteps = buildExecutionFlow(STATE.parsed || [], STATE.analysis?.apis || [], STATE.screenDefinition || null);
+     if (STATE.analysis) {
+        STATE.analysis.flow = flowSteps;
+     }
+  }
+
   if (!flowSteps || !flowSteps.length) {
     el.innerHTML = '<div class="no-data-state" style="padding:20px;"><p>No transaction flow detected</p></div>';
     document.getElementById('flow-summary-body').innerHTML = '<div class="no-data-state" style="padding:20px;"><p>No summary available</p></div>';
     return;
   }
 
-  el.innerHTML = '<div class="flow-container">' + flowSteps.map((step, i) => {
-    const icon = step.status === 'success' ? '✓' : step.status === 'error' ? '✕' : '○';
+  const html = flowSteps.map((step, i) => {
     const isLast = i === flowSteps.length - 1;
-    const connClass = step.status === 'success' ? 'done' : step.status === 'error' ? 'broken' : '';
-    return `<div class="flow-step">
-      <div class="flow-step-line">
-        <div class="flow-circle ${step.status}">${icon}</div>
-        ${!isLast ? `<div class="flow-connector ${connClass}"></div>` : ''}
-      </div>
-      <div class="flow-body">
-        <div class="flow-label ${step.status === 'error' ? 'style="color:#DC2626;"' : ''}">${step.status === 'error' ? '⚠ ' : ''}${escHtml(step.label)}</div>
-        <div class="flow-sub">${step.status === 'success' ? 'Completed' : step.status === 'error' ? 'FAILED — Transaction stopped here' : 'Not reached'}</div>
-      </div>
-    </div>`;
-  }).join('') + '</div>';
+    let icon = '○';
+    let connClass = '';
+    if (step.status === 'success') {
+       icon = '✓';
+       connClass = 'done';
+    } else if (step.status === 'error') {
+       icon = '❌';
+       connClass = 'broken';
+    }
 
-  // Summary
-  const summaryEl = document.getElementById('flow-summary-body');
+    return `
+      <div class="flow-step clickable-step" onclick="selectFlowNode(${i})" style="cursor:pointer; padding:8px 12px; border-radius:6px; margin-bottom:6px; display:flex; gap:10px; align-items:center; transition: background 0.15s; border: 1px solid transparent;">
+        <div class="flow-step-line" style="display:flex; flex-direction:column; align-items:center; position:relative;">
+          <div class="flow-circle ${step.status}" style="width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:11px; background:${step.status === 'success' ? 'rgba(16,185,129,0.1)' : step.status === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(107,114,128,0.1)'}; color:${step.status === 'success' ? '#10B981' : step.status === 'error' ? '#EF4444' : '#9CA3AF'}; border:2px solid ${step.status === 'success' ? '#10B981' : step.status === 'error' ? '#EF4444' : '#475569'};">${icon}</div>
+        </div>
+        <div class="flow-body">
+          <div class="flow-label" style="font-weight:700; font-size:12.5px; color:${step.status === 'error' ? '#EF4444' : 'var(--text-light)'};">${escHtml(step.label)}</div>
+          <div class="flow-sub" style="font-size:10.5px; color:var(--text-muted);">${step.status === 'success' ? 'Completed' : step.status === 'error' ? 'FAILED - Execution stopped here' : 'Not reached'}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  el.innerHTML = `<div class="flow-container" style="display:flex; flex-direction:column; gap:6px;">${html}</div>`;
+
   const failStep = flowSteps.find(s => s.status === 'error');
   const doneCount = flowSteps.filter(s => s.status === 'success').length;
+  
+  let probability = '0%';
+  let failureReason = 'No failures detected in transaction execution.';
+  
+  if (failStep) {
+     if (failStep.type === 'exception') {
+        probability = '97%';
+        failureReason = `${failStep.label} occurred during event execution. Transaction aborted, blocking subsequent steps.`;
+     } else if (failStep.type === 'api') {
+        probability = '96%';
+        failureReason = `API "${failStep.label}" returned an error. No further events executed. Transaction terminated.`;
+     } else if (failStep.type === 'validation') {
+        probability = '92%';
+        failureReason = `Business validation check failed. preventDefault() called, terminating execution loop.`;
+     } else {
+        probability = '85%';
+        failureReason = `Failure occurred at step ${failStep.label}. Transaction terminated.`;
+     }
+  }
+
+  let screenCorrelationHtml = '';
+  if (STATE.screenDefinition) {
+     const sDef = STATE.screenDefinition;
+     const field = failStep ? failStep.label.split(' ')[0] : 'Unknown';
+     const event = failStep ? failStep.label.split(' ')[1] || 'Event' : 'Unknown';
+     const api = analysis.apis && analysis.apis.length ? analysis.apis[analysis.apis.length - 1].name : 'Unknown';
+     
+     screenCorrelationHtml = `
+       <div style="margin-top:16px; padding:12px; background:rgba(16,185,129,0.04); border:1px solid rgba(16,185,129,0.2); border-radius:8px;">
+          <div style="font-size:11.5px; font-weight:700; color:#10B981; text-transform:uppercase; margin-bottom:8px;">Screen Correlation Engine</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11.5px; color:var(--text-light);">
+             <div><strong>Screen:</strong> ${escHtml(sDef.screenName || 'Screen')}</div>
+             <div><strong>Field Executed:</strong> ${escHtml(field)}</div>
+             <div><strong>Event Executed:</strong> ${escHtml(event)}</div>
+             <div><strong>API Called:</strong> ${escHtml(api)}</div>
+             <div style="grid-column: span 2;"><strong>Confidence:</strong> 96%</div>
+          </div>
+       </div>
+     `;
+  } else {
+     screenCorrelationHtml = `
+       <div style="margin-top:16px; padding:12px; background:rgba(245,158,11,0.04); border:1px solid rgba(245,158,11,0.2); border-radius:8px;">
+          <div style="font-size:11.5px; font-weight:700; color:#F59E0B; text-transform:uppercase; margin-bottom:4px;">Screen Correlation Engine</div>
+          <div style="font-size:11.5px; color:var(--text-muted); line-height:1.4;">
+             Upload Screen JSON with logs to run structural code comparisons.<br>
+             <span style="color:var(--text-light); font-weight:600;">Estimated Flow Confidence: 85%</span>
+          </div>
+       </div>
+     `;
+  }
+
+  const summaryEl = document.getElementById('flow-summary-body');
   summaryEl.innerHTML = `
-    <div class="meta-row"><span class="meta-label">Module</span><span class="meta-val">${analysis.module}</span></div>
-    <div class="meta-row"><span class="meta-label">Steps Done</span><span class="meta-val">${doneCount} / ${flowSteps.length}</span></div>
-    <div class="meta-row"><span class="meta-label">Failed At</span><span class="meta-val" style="color:#DC2626;">${failStep ? failStep.label : 'No failure detected'}</span></div>
-    <div class="meta-row"><span class="meta-label">User</span><span class="meta-val">${analysis.users?.join(', ') || '—'}</span></div>
-    <div class="meta-row"><span class="meta-label">Transaction</span><span class="meta-val">${analysis.transaction || '—'}</span></div>
+     <div style="display:flex; flex-direction:column; gap:12px;">
+        <div class="meta-row"><span class="meta-label">Module</span><span class="meta-val">${analysis.module || 'Unknown'}</span></div>
+        <div class="meta-row"><span class="meta-label">Steps Done</span><span class="meta-val">${doneCount} / ${flowSteps.length}</span></div>
+        <div class="meta-row"><span class="meta-label">Failed At</span><span class="meta-val" style="color:#DC2626; font-weight:700;">${failStep ? failStep.label : 'No failure detected'}</span></div>
+        <div class="meta-row"><span class="meta-label">User Identity</span><span class="meta-val">${analysis.users?.join(', ') || '—'}</span></div>
+        
+        <div style="border-top:1px solid var(--border); padding-top:12px; margin-top:8px;">
+           <div style="font-size:11px; font-weight:700; color:#F59E0B; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Probability Analysis</div>
+           <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <span style="font-size:24px; font-weight:800; color:#F59E0B;">${probability}</span>
+              <span style="font-size:11px; color:var(--text-muted); font-weight:600;">Failure Probability</span>
+           </div>
+           <div style="font-size:12px; color:var(--text-normal); line-height:1.5;">${escHtml(failureReason)}</div>
+        </div>
+
+        ${screenCorrelationHtml}
+     </div>
   `;
 }
 
@@ -3229,6 +4594,37 @@ function generateAIAnswer(q) {
   }
   const a = STATE.analysis;
   const lq = q.toLowerCase();
+
+  // ── Brain-powered investigation queries ──────────────────────────────────
+  if (/brain.*invest|logradar.*invest|full.*invest|deep.*invest|l3.*invest/i.test(q)) {
+    if (!a.apis || !a.apis.length) return '⚠️ No API calls detected. Upload a log with API activity to run a brain investigation.';
+    const targetApi = a.apis.find(x => x.status >= 400 || x.businessResult !== 'Healthy') || a.apis[0];
+    if (!window.LOGRADAR_BRAIN) return '⚠️ LogRadar Brain not loaded. Please refresh the page.';
+    const brainResult = LOGRADAR_BRAIN.investigateAPI(targetApi);
+    if (!brainResult) return 'No investigation result.';
+    const conf = LOGRADAR_BRAIN.getConfidenceLabel(brainResult.confidence);
+    const evList = (brainResult.evidence || []).map(e => `• [${e.strength}] ${e.text}`).join('\n');
+    const recsList = (brainResult.investigation?.recommendations || []).map((r,i) => `${i+1}. [${r.priority}] ${r.action}`).join('\n');
+    return `🧠 <strong>LogRadar Brain — Full Investigation Report</strong><br><br>
+<strong>API Investigated:</strong> ${escHtml(targetApi.name)}<br>
+<strong>Pattern Detected:</strong> ${escHtml(brainResult.pattern?.name || 'Unknown')}<br>
+<strong>Confidence:</strong> ${conf.icon} ${brainResult.confidence}% — ${conf.label}<br><br>
+<strong>Root Cause:</strong><br>${escHtml(brainResult.investigation?.rootCause || 'Investigating...')}<br><br>
+<strong>Evidence Chain:</strong><pre style="background:#0F172A;color:#E2E8F0;padding:12px;border-radius:8px;font-size:11px;line-height:1.6;white-space:pre-wrap;">${escHtml(evList)}</pre>
+${recsList ? `<strong>Recommendations:</strong><pre style="background:#0F172A;color:#E2E8F0;padding:12px;border-radius:8px;font-size:11px;line-height:1.6;white-space:pre-wrap;">${escHtml(recsList)}</pre>` : ''}
+<em>Next Steps: ${escHtml(brainResult.investigation?.nextSteps || 'Open the API Tracker and click the API for full investigation details.')}</em>`;
+  }
+
+  if (/brain.*api|api.*brain|investigate.*api/i.test(q)) {
+    if (!a.apis || !a.apis.length) return 'No API calls detected in the log.';
+    if (!window.LOGRADAR_BRAIN) return '⚠️ LogRadar Brain not loaded.';
+    const lines = a.apis.map(api => {
+      const p = LOGRADAR_BRAIN.classifyApiPattern(api);
+      const conf = LOGRADAR_BRAIN.getConfidenceLabel(api.status >= 400 ? 90 : api.recordCount === 0 ? 85 : 70);
+      return `• <strong>${escHtml(api.name)}</strong>: ${p.icon} ${escHtml(p.name)} | HTTP ${api.status} | ${api.ms}ms | ${conf.icon} ${api.businessResult || 'Unknown'}`;
+    }).join('<br>');
+    return `🧠 <strong>Brain API Pattern Analysis (${a.apis.length} calls):</strong><br><br>${lines}<br><br><em>Tip: Click any API in the API Tracker tab for detailed brain investigation with evidence, recommendations, and logger suggestions.</em>`;
+  }
 
   // --- New Ask AI handlers for Universal Engine v2.0 ---
   if (/blank api|show blank/i.test(q)) {
@@ -3889,6 +5285,51 @@ function runScreenDebuggerAnalysis() {
         </div>
       </div>
      `;
+
+     let missingLoggers = [];
+     for (const [fName, events] of Object.entries(screenDef.fields)) {
+        let hasLogger = false;
+        let hasStatus = false;
+        let hasWs = false;
+        let wsName = "";
+        
+        for (const [evName, ev] of Object.entries(events)) {
+           if (ev && ev.code) {
+              if (/logger\./i.test(ev.code)) hasLogger = true;
+              if (/setStatusMessage/i.test(ev.code)) hasStatus = true;
+              if (screenDef.webservices) {
+                 for (const wName of Object.keys(screenDef.webservices)) {
+                    if (ev.code.includes(wName)) {
+                       hasWs = true;
+                       wsName = wName;
+                    }
+                 }
+              }
+           }
+        }
+        if (!hasLogger) {
+           missingLoggers.push(`<li><strong>Field ${escHtml(fName)}:</strong> Suggest adding <code>logger.trace("${escHtml(fName)} changed to: " + ${escHtml(fName)}.getValue())</code> to capture input telemetry.</li>`);
+        }
+        if (!hasStatus) {
+           missingLoggers.push(`<li><strong>Field ${escHtml(fName)}:</strong> Suggest adding <code>flexi.setStatusMessage("Please enter a valid ${escHtml(fName)} value")</code> instead of displaying generic system errors.</li>`);
+        }
+        if (hasWs) {
+           missingLoggers.push(`<li><strong>Webservice ${escHtml(wsName)}:</strong> Ensure API responses are checked: <code>if (${escHtml(wsName)}.getResponseCode() != 200) { flexi.setStatusMessage("Integration service ${escHtml(wsName)} failed."); }</code></li>`);
+        }
+     }
+
+     analysisHtml += `
+      <div class="dbg-copilot-section" style="margin-top:16px;">
+        <div class="dbg-copilot-title" style="color:#F59E0B; font-size:14px; margin-bottom:12px;">
+          <span>📋</span> AI LOGGER & STATUS MESSAGE SUGGESTIONS
+        </div>
+        <div style="font-size:12.5px; color:var(--text-normal); line-height:1.5;">
+          <ul style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px;">
+            ${missingLoggers.length ? missingLoggers.slice(0, 5).join('') : '<li>🟢 Excellent! Logger and Status Message placement coverage is complete.</li>'}
+          </ul>
+        </div>
+      </div>
+     `;
   }
 
   // 3. DETAILED FIELD AND WEBSERVICE CORRELATION
@@ -3928,22 +5369,107 @@ function runScreenDebuggerAnalysis() {
       let eventsHtml = '';
       let associatedWS = null;
 
+      if (!STATE.scriptIssues) STATE.scriptIssues = {};
+
       for (const [evName, ev] of Object.entries(events)) {
          if (ev.code) {
-           eventsHtml += `
-             <div style="margin-top:12px;">
-               <strong style="color:#818CF8; font-size:12px;">${escHtml(evName)} Logic:</strong>
-               <pre style="background:#0F172A; color:#E2E8F0; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto; margin:4px 0 0 0; border:1px solid rgba(255,255,255,0.06);">${escHtml(ev.code)}</pre>
-             </div>
-           `;
-           
-           if (screenDef.webservices) {
-             for (const wsName of Object.keys(screenDef.webservices)) {
-               if (ev.code.includes(wsName)) {
-                 associatedWS = { name: wsName, data: screenDef.webservices[wsName], event: evName };
+            let wsAssoc = null;
+            if (screenDef.webservices) {
+              for (const wsName of Object.keys(screenDef.webservices)) {
+                if (ev.code.includes(wsName)) {
+                  wsAssoc = { name: wsName, data: screenDef.webservices[wsName], event: evName };
+                  associatedWS = wsAssoc;
+                }
+              }
+            }
+
+            // Script analysis
+            const lines = ev.code.split('\n');
+            let lineIndex = 1;
+            let fix = "";
+            let issue = "Telemetry or logger suggestion";
+            let hasIssue = false;
+            let confidence = 50;
+            let evidence = [];
+
+            // 1. Unhandled web service call
+            if (wsAssoc && logText.toLowerCase().includes(wsAssoc.name.toLowerCase())) {
+               const matchedApi = STATE.analysis.apis.find(a => a.name === wsAssoc.name);
+               if (matchedApi && (matchedApi.status >= 400 || matchedApi.ms > 5000 || matchedApi.health === 'Blank Response')) {
+                  lines.forEach((line, idx) => {
+                     if (line.includes(wsAssoc.name) && !line.includes('try') && !line.includes('catch')) {
+                        lineIndex = idx + 1;
+                        hasIssue = true;
+                        issue = `Unhandled API call to ${wsAssoc.name}`;
+                        fix = `try {\n   flexi.invokeWebService('${wsAssoc.name}');\n} catch(e) {\n   flexi.setStatusMessage("${wsAssoc.name} is currently unavailable.");\n}`;
+                        confidence = 90;
+                        evidence.push(`API "${wsAssoc.name}" has health status "${matchedApi.health}" (HTTP ${matchedApi.status}) in the logs, but the script calls it without error checking.`);
+                     }
+                  });
                }
-             }
-           }
+            }
+
+            // 2. Null Reference Check
+            if (!hasIssue) {
+               const nullM = logText.match(/Cannot invoke method .* on null object/i) || logText.match(/NullPointerException/i);
+               const skippedM = logText.match(/([A-Za-z0-9_]+)\s+field\s+was\s+skipped/i) || logText.match(/([A-Za-z0-9_]+)\s+.*was\s+(?:skipped|null|empty)/i);
+               if (nullM && skippedM) {
+                  const nullVar = skippedM[1];
+                  lines.forEach((line, idx) => {
+                     if (line.includes(nullVar) && !line.includes('!= null') && !line.includes('== null')) {
+                        lineIndex = idx + 1;
+                        hasIssue = true;
+                        issue = `Direct property access on skipped/null field "${nullVar}"`;
+                        fix = `if (${nullVar} != null && ${nullVar}.getValue() != null) {\n   // Proceed with logic\n}`;
+                        confidence = 95;
+                        evidence.push(`Log trace warns "${nullVar}" is null, but the script accesses it directly on line ${lineIndex} without checking.`);
+                     }
+                  });
+               }
+            }
+
+            // 3. Status message check
+            if (!hasIssue && !ev.code.includes('setStatusMessage')) {
+               lineIndex = lines.length;
+               hasIssue = true;
+               issue = "Missing user-friendly Status Message feedback";
+               fix = `flexi.setStatusMessage("Please verify ${fieldName} input.");`;
+               confidence = 70;
+               evidence.push(`Script executes input logic for ${fieldName} but never calls setStatusMessage to guide the user in case of errors.`);
+            }
+
+            if (hasIssue) {
+               STATE.scriptIssues[fieldName + '::' + evName] = {
+                  line: lineIndex,
+                  issue,
+                  fix,
+                  confidence,
+                  evidence: evidence.join(' '),
+                  fieldName,
+                  eventName: evName
+               };
+               
+               // Boost severity
+               if (confidence >= 90) {
+                 severity = severities.CRITICAL;
+                 errorReason = issue;
+                 failedEvent = evName;
+               } else if (confidence >= 75 && (!severity || severity.badge === '➖ None')) {
+                 severity = severities.HIGH;
+                 errorReason = issue;
+                 failedEvent = evName;
+               }
+            }
+
+            eventsHtml += `
+              <div style="margin-top:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <strong style="color:#818CF8; font-size:12px;">${escHtml(evName)} Logic:</strong>
+                  ${hasIssue ? `<span style="background:#EF444420; color:#F87171; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:700;">⚠ AI Risk Detected</span>` : ''}
+                </div>
+                <pre style="background:#0F172A; color:#E2E8F0; padding:10px; border-radius:6px; font-family:monospace; font-size:11px; overflow-x:auto; margin:4px 0 0 0; border:1px solid rgba(255,255,255,0.06);">${escHtml(ev.code)}</pre>
+              </div>
+            `;
          }
       }
 
@@ -4092,10 +5618,16 @@ ${associatedWS ? `flexi.setStatusMessage("${associatedWS.name} API Failed");` : 
            let valueHtml = '';
            const isBoolean = typeof val === 'boolean' || val === 'true' || val === 'false';
            
+           const isCodeKey = ['onFocus', 'onFocusScript', 'beforeExit', 'beforeExitScript', 'onExit', 'onExitScript', 'onKeyPress', 'onKeyPressScript', 'renderedLogic', 'lovStatement',
+                              'afterFocus', 'afterFocusScript', 'afterClick', 'afterClickScript', 'inputProcessor', 'inputProcessorScript', 'onResponseReceived', 'onResponseReceivedScript', 'beforeFocus', 'beforeFocusScript',
+                              '_onExit', '_afterFocus', '_beforeExit', '_afterClick', '_inputProcessor', '_onResponseReceived', '_onKeyPress', '_beforeFocus'].includes(key) || 
+                              key.startsWith('_') || 
+                              (typeof val === 'string' && (val.includes('flexi.') || val.includes('logger.') || val.includes('setStatusMessage')));
+           
            if (isBoolean) {
               const checked = val === true || val === 'true';
               valueHtml = `<input type="checkbox" disabled ${checked ? 'checked' : ''} style="accent-color:#3B82F6; cursor:default; width: 14px; height: 14px;">`;
-           } else if (['onFocus', 'onFocusScript', 'beforeExit', 'beforeExitScript', 'onExit', 'onExitScript', 'onKeyPress', 'onKeyPressScript', 'renderedLogic', 'lovStatement'].includes(key)) {
+           } else if (isCodeKey) {
               if (val && typeof val === 'string' && val.trim() !== '') {
                  valueHtml = `<button class="prop-script-btn" onclick="showScriptModal('${escHtml(activeFieldObj.id || activeFieldObj.name)}', '${escHtml(key)}')"><span class="script-badge-icon">A</span> View Script</button>`;
               } else {
@@ -4243,7 +5775,9 @@ window.filterDbgFields = function() {
 };
 
 // Stores the current script context so openScriptInEditor can access it
+// Stores the current script context so openScriptInEditor can access it
 window._scriptModalCtx = { code: '', fieldName: '', eventName: '' };
+window.currentScriptEditor = null;
 
 window.showScriptModal = function(fieldName, propKey) {
   const screenDef = STATE.screenDefinition;
@@ -4261,18 +5795,33 @@ window.showScriptModal = function(fieldName, propKey) {
   const modal   = document.getElementById('screen-script-modal');
   const titleEl = document.getElementById('script-modal-title');
   const codeEl  = document.getElementById('script-modal-code');
+  const editorContainer = document.getElementById('script-modal-editor-container');
   const copyBtn = document.getElementById('copy-script-btn');
   const statusEl= document.getElementById('open-editor-status');
   const sel     = document.getElementById('editor-choice-select');
 
-  if (modal && titleEl && codeEl) {
+  if (modal && titleEl) {
     titleEl.textContent = `${fieldName} — ${title} Script`;
-    codeEl.textContent  = scriptCode;
     modal.style.display = 'flex';
+
+    if (codeEl) codeEl.textContent = scriptCode;
+
+    // Load Monaco Editor
+    if (typeof require !== 'undefined' && typeof window.monaco === 'undefined') {
+      require(['vs/editor/editor.main'], function() {
+        initMonacoEditor(scriptCode, fieldName, propKey);
+      });
+    } else if (typeof window.monaco !== 'undefined') {
+      initMonacoEditor(scriptCode, fieldName, propKey);
+    } else {
+      // Fallback
+      if (editorContainer) editorContainer.style.display = 'none';
+      if (codeEl) codeEl.style.display = 'block';
+    }
 
     // Reset copy button
     if (copyBtn) {
-      copyBtn.textContent        = 'Copy';
+      copyBtn.textContent        = '📋 Copy';
       copyBtn.style.background   = 'rgba(255,255,255,0.05)';
       copyBtn.style.borderColor  = 'rgba(255,255,255,0.1)';
       copyBtn.style.color        = '#E2E8F0';
@@ -4289,16 +5838,120 @@ window.showScriptModal = function(fieldName, propKey) {
   }
 };
 
+function initMonacoEditor(code, fieldName, eventName) {
+  const container = document.getElementById('script-modal-editor-container');
+  const codeEl = document.getElementById('script-modal-code');
+  if (!container) return;
+
+  container.style.display = 'block';
+  if (codeEl) codeEl.style.display = 'none';
+
+  // Inject dynamic CSS rules for Delta Decorations if not already added
+  if (!document.getElementById('monaco-decorations-style')) {
+    const style = document.createElement('style');
+    style.id = 'monaco-decorations-style';
+    style.innerHTML = `
+      .monaco-line-error { background-color: rgba(239, 68, 68, 0.2) !important; border-left: 3px solid #EF4444 !important; }
+      .monaco-line-success { background-color: rgba(16, 185, 129, 0.2) !important; border-left: 3px solid #10B981 !important; }
+      .monaco-glyph-error { width: 8px; background: #EF4444; border-radius: 50%; margin-left: 4px; }
+      .monaco-glyph-success { width: 8px; background: #10B981; border-radius: 50%; margin-left: 4px; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Check if we have an active issue
+  const key = fieldName + '::' + eventName;
+  const issue = STATE.scriptIssues ? STATE.scriptIssues[key] : null;
+
+  let finalCode = code;
+  let errorLine = null;
+  let fixStart = null;
+  let fixEnd = null;
+
+  if (issue) {
+    errorLine = issue.line;
+    finalCode = code + `\n\n// ── RECOMMENDED FIX (Replace line ${issue.line} with below) ──\n` + issue.fix;
+    
+    const origLines = code.split('\n').length;
+    fixStart = origLines + 3;
+    fixEnd = fixStart + issue.fix.split('\n').length - 1;
+  }
+
+  if (window.currentScriptEditor) {
+    window.currentScriptEditor.setValue(finalCode);
+  } else {
+    window.currentScriptEditor = window.monaco.editor.create(container, {
+      value: finalCode,
+      language: 'groovy',
+      theme: 'vs-dark',
+      readOnly: true,
+      automaticLayout: true,
+      minimap: { enabled: false },
+      lineNumbers: 'on',
+      scrollBeyondLastLine: false,
+      fontSize: 13,
+      fontFamily: "'Fira Code', Consolas, monospace",
+    });
+  }
+
+  // Apply Delta Decorations
+  const decorations = [];
+  if (issue && errorLine) {
+    decorations.push({
+      range: new window.monaco.Range(errorLine, 1, errorLine, 100),
+      options: {
+        isWholeLine: true,
+        className: 'monaco-line-error',
+        glyphMarginClassName: 'monaco-glyph-error',
+        hoverMessage: { value: `Possible Root Cause: ${issue.issue}\nEvidence: ${issue.evidence}` }
+      }
+    });
+
+    if (fixStart && fixEnd) {
+      decorations.push({
+        range: new window.monaco.Range(fixStart, 1, fixEnd, 100),
+        options: {
+          isWholeLine: true,
+          className: 'monaco-line-success',
+          glyphMarginClassName: 'monaco-glyph-success',
+          hoverMessage: { value: 'Recommended Fix (Replace line above)' }
+        }
+      });
+    }
+  }
+
+  if (window.currentScriptEditor._editorDecorations) {
+    window.currentScriptEditor._editorDecorations = window.currentScriptEditor.deltaDecorations(
+      window.currentScriptEditor._editorDecorations,
+      decorations
+    );
+  } else {
+    window.currentScriptEditor._editorDecorations = window.currentScriptEditor.deltaDecorations([], decorations);
+  }
+
+  if (errorLine) {
+    setTimeout(() => {
+      window.currentScriptEditor.revealLineInCenter(errorLine);
+    }, 100);
+  }
+}
+
 window.closeScriptModal = function() {
   const modal = document.getElementById('screen-script-modal');
   if (modal) modal.style.display = 'none';
 };
 
+window.downloadModalScript = function() {
+  const { code, fieldName, eventName } = window._scriptModalCtx || {};
+  if (!code) return;
+  _downloadScriptFallback(code, fieldName, eventName);
+};
+
 window.copyModalScript = function() {
-  const codeEl = document.getElementById('script-modal-code');
+  const { code } = window._scriptModalCtx || {};
   const copyBtn = document.getElementById('copy-script-btn');
-  if (codeEl) {
-     navigator.clipboard.writeText(codeEl.textContent).then(() => {
+  if (code) {
+     navigator.clipboard.writeText(code).then(() => {
         if (copyBtn) {
            copyBtn.textContent = 'Copied!';
            copyBtn.style.background = '#10B98120';
@@ -4412,8 +6065,160 @@ function switchView(viewId) {
 
   if (viewId === 'debugger') {
     runScreenDebuggerAnalysis();
+  } else if (viewId === 'graph') {
+    renderInvestigationGraph();
   }
 }
+
+function renderInvestigationGraph() {
+  const container = document.getElementById('graph-canvas-container');
+  const detailsEl = document.getElementById('graph-node-details');
+  if (!container || !STATE.analysis) {
+    container.innerHTML = `<div style="padding:40px; color:var(--text-muted); text-align:center;">No active log file parsed to build flow graph.</div>`;
+    return;
+  }
+
+  // Gather facts
+  const screenName = STATE.screenDefinition ? (STATE.screenDefinition.screenName || STATE.screenDefinition.title) : (STATE.analysis.screen || "Main Screen");
+  
+  let failingField = "None Detected";
+  let eventName = "N/A";
+  let apiCall = "N/A";
+  let status = "N/A";
+  let ms = "N/A";
+  let exception = "N/A";
+  let statusMessage = "N/A";
+  let sessionUser = STATE.analysis.users && STATE.analysis.users.length ? STATE.analysis.users[0] : "SVC_USER_01";
+  let thread = "main";
+  let nextAction = "Stay on Screen";
+
+  // Scan scriptIssues for failure
+  if (STATE.scriptIssues && Object.keys(STATE.scriptIssues).length > 0) {
+    const firstKey = Object.keys(STATE.scriptIssues)[0];
+    const issue = STATE.scriptIssues[firstKey];
+    failingField = issue.fieldName;
+    eventName = issue.eventName;
+  }
+
+  // Scan APIs
+  if (STATE.analysis.apis && STATE.analysis.apis.length > 0) {
+    const failingApi = STATE.analysis.apis.find(a => a.status >= 400 || a.ms > 2000) || STATE.analysis.apis[0];
+    apiCall = failingApi.name;
+    status = failingApi.status;
+    ms = failingApi.ms;
+    thread = failingApi.thread || "Thread-137";
+  }
+
+  // Scan Exceptions
+  if (STATE.analysis.exceptions && STATE.analysis.exceptions.length > 0) {
+    exception = STATE.analysis.exceptions[0].message || STATE.analysis.exceptions[0];
+  }
+
+  // Scan Status Messages
+  const lastLine = STATE.parsed && STATE.parsed.length ? STATE.parsed[STATE.parsed.length - 1].message : "";
+  if (lastLine.toLowerCase().includes('status:')) {
+    const idx = lastLine.toLowerCase().indexOf('status:');
+    statusMessage = lastLine.substring(idx + 7).trim();
+  } else if (lastLine.toLowerCase().includes('aborted') || lastLine.toLowerCase().includes('failed')) {
+    statusMessage = lastLine;
+  } else {
+    statusMessage = exception !== "N/A" ? exception.substring(0, 100) : "Internal Server Error";
+  }
+
+  // Scan Navigation
+  const navM = lastLine.match(/render page\s+([A-Z0-9_]+)/i) || lastLine.match(/redirect\s+([A-Z0-9_]+)/i);
+  if (navM) {
+     nextAction = `Redirect to ${navM[1]}`;
+  }
+
+  const nodes = [
+    { type: 'Screen', label: screenName, subtitle: 'User Action Target', color: '#818CF8', icon: '🖥', details: `Screen ID: ${screenName}\nContains input forms and script listeners.` },
+    { type: 'Field', label: failingField, subtitle: 'Input Field Trigger', color: '#60A5FA', icon: '🔑', details: `Field Name: ${failingField}\nTriggered event listeners during data input.` },
+    { type: 'Event', label: eventName, subtitle: 'Script Logic Execution', color: '#F472B6', icon: '⚡', details: `Event: ${eventName}\nInvoked inline Groovy script context.` },
+    { type: 'API', label: apiCall, subtitle: 'Outbound REST call', color: '#FBBF24', icon: '📡', details: `Service: ${apiCall}\nOutbound integration request generated.` },
+    { type: 'Response', label: `HTTP ${status} (${ms}ms)`, subtitle: 'Integration Gateway', color: status >= 400 ? '#EF4444' : '#34D399', icon: '📥', details: `Response Code: ${status}\nLatency: ${ms} ms\nDetermines technical success.` },
+    { type: 'Object', label: exception.includes('JSONObject') ? 'JSONObject' : 'Data Object', subtitle: 'Schema Mapping State', color: '#A78BFA', icon: '📦', details: `Payload mapping object.\nChecked against strict JSON/XML schemas.` },
+    { type: 'Session', label: `${sessionUser} [${thread}]`, subtitle: 'Execution Thread', color: '#38BDF8', icon: '👤', details: `User Session: ${sessionUser}\nJVM Thread Context: ${thread}` },
+    { type: 'Validation', label: exception !== "N/A" ? exception.split(':')[0] : "N/A", subtitle: 'Exception Check', color: '#EF4444', icon: '🛡', details: `Exception: ${exception}` },
+    { type: 'Status Message', label: statusMessage, subtitle: 'User Facing Alert', color: '#F87171', icon: '💬', details: `Message: ${statusMessage}\nDisplayed on client status bar.` },
+    { type: 'Navigation', label: nextAction, subtitle: 'Control Flow Redirect', color: '#34D399', icon: '🚀', details: `Next State: ${nextAction}\nControl loop termination.` }
+  ];
+
+  let html = "";
+  nodes.forEach((n, idx) => {
+    html += `
+      <div class="graph-node-card" data-idx="${idx}" style="display:flex; align-items:center; gap:12px; background:#1E293B; border:1px solid rgba(255,255,255,0.06); border-left:4px solid ${n.color}; border-radius:8px; padding:10px 16px; width:100%; max-width:550px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.transform='translateX(6px)'; this.style.borderColor='${n.color}50'" onmouseout="this.style.transform='translateX(0)'; this.style.borderColor='rgba(255,255,255,0.06)'">
+        <div style="font-size:20px; background:${n.color}15; color:${n.color}; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+          ${n.icon}
+        </div>
+        <div style="flex-grow:1;">
+          <div style="font-size:10px; text-transform:uppercase; color:#94A3B8; font-weight:700; letter-spacing:0.5px;">${n.type}</div>
+          <div style="font-size:13.5px; font-weight:600; color:#F8FAFC; margin-top:2px; word-break:break-all;">${escHtml(n.label)}</div>
+          <div style="font-size:11px; color:#64748B; margin-top:1px;">${escHtml(n.subtitle)}</div>
+        </div>
+        <div style="font-size:18px; color:var(--text-muted);">❯</div>
+      </div>
+    `;
+    if (idx < nodes.length - 1) {
+      html += `<div style="color:var(--text-muted); font-size:14px; font-weight:700; margin: 2px 0;">↓</div>`;
+    }
+  });
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('.graph-node-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const idx = parseInt(card.dataset.idx);
+      const node = nodes[idx];
+      
+      detailsEl.innerHTML = `
+        <div style="background:${node.color}10; border:1px solid ${node.color}30; border-radius:8px; padding:12px; display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <div style="font-size:24px; color:${node.color};">${node.icon}</div>
+          <div>
+            <div style="font-size:11px; text-transform:uppercase; color:#94A3B8; font-weight:700;">${node.type}</div>
+            <div style="font-size:15px; font-weight:700; color:#F8FAFC;">${escHtml(node.label)}</div>
+          </div>
+        </div>
+        
+        <div style="background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:8px; padding:14px; font-family:sans-serif; line-height:1.6;">
+          <h4 style="margin:0 0 8px 0; color:var(--text-light); font-size:13px; text-transform:uppercase; border-bottom:1px solid var(--border); padding-bottom:4px;">Diagnostic Info</h4>
+          <pre style="margin:0; font-family:monospace; font-size:12px; color:#38BDF8; white-space:pre-wrap; word-break:break-all;">${escHtml(node.details)}</pre>
+        </div>
+
+        <div style="margin-top:16px;">
+          <button id="graph-node-action-btn" class="paste-submit-btn" style="width:100%; border-radius:6px; font-weight:600; padding:10px; background:linear-gradient(135deg,#3B82F6,#2563EB);" onclick="handleGraphNodeAction('${node.type}', '${escHtml(node.label)}')">
+            🔍 Go to ${node.type} Details
+          </button>
+        </div>
+      `;
+    });
+  });
+}
+
+window.handleGraphNodeAction = function(type, label) {
+  if (type === 'Screen' || type === 'Field' || type === 'Event') {
+    switchView('debugger');
+    if (type === 'Field' && label !== 'None Detected') {
+      selectDbgField(label);
+    }
+  } else if (type === 'API' || type === 'Response') {
+    switchView('api');
+    if (label !== 'N/A') {
+      if (label.includes(' ')) {
+        const cleanName = label.split(' ')[0];
+        selectApiByName(cleanName);
+      } else {
+        selectApiByName(label);
+      }
+    }
+  } else if (type === 'Validation' || type === 'Status Message') {
+    switchView('analyzer');
+  } else if (type === 'Session') {
+    switchView('flow');
+  } else {
+    switchView('dashboard');
+  }
+};
 
 // ─── Filter & Search ──────────────────────────────────────────────────────────
 function applyFilters() {

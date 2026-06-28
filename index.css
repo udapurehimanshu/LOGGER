@@ -1588,21 +1588,129 @@ body.privacy-active .ts-col {
 }
 
 .api-badge.success {
-  background: var(--success-bg);
-  color: var(--success-text);
-  border: 1px solid var(--success-border);
+  background: rgba(16,185,129,0.1);
+  color: #10B981;
+  border: 1px solid rgba(16,185,129,0.2);
 }
 
-.api-badge.error {
-  background: var(--error-bg);
-  color: var(--error-text);
-  border: 1px solid var(--error-border);
+.api-badge.blank {
+  background: rgba(245,158,11,0.1);
+  color: #F59E0B;
+  border: 1px solid rgba(245,158,11,0.2);
 }
 
-.api-badge.warn {
-  background: var(--warning-bg);
-  color: var(--warning-text);
-  border: 1px solid var(--warning-border);
+.api-badge.slow {
+  background: rgba(249,115,22,0.1);
+  color: #F97316;
+  border: 1px solid rgba(249,115,22,0.2);
+}
+
+.api-badge.failed {
+  background: rgba(239,68,68,0.1);
+  color: #EF4444;
+  border: 1px solid rgba(239,68,68,0.2);
+}
+
+.api-badge.retry {
+  background: rgba(59,130,246,0.1);
+  color: #3B82F6;
+  border: 1px solid rgba(59,130,246,0.2);
+}
+
+.api-badge.http-unknown {
+  background: rgba(148,163,184,0.1);
+  color: #94A3B8;
+  border: 1px solid rgba(148,163,184,0.2);
+}
+
+.api-tab-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 12.5px;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  padding: 10px 4px;
+}
+.api-tab-btn:hover {
+  color: var(--text-light);
+}
+.api-tab-btn.active {
+  color: var(--primary);
+  font-weight: 700;
+  border-bottom-color: var(--primary);
+}
+
+.api-filter-bar::-webkit-scrollbar {
+  display: none;
+}
+.filter-pill {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.filter-pill:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-light);
+}
+.filter-pill.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* Related Chain visualizer styling */
+.related-chain-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 12px 4px;
+  scrollbar-width: thin;
+}
+.related-node {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  max-width: 140px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.related-node:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.related-node.selected {
+  border-color: var(--primary) !important;
+  background: rgba(59,130,246,0.05);
+}
+.related-node.success { border-left: 3px solid #10B981; }
+.related-node.blank { border-left: 3px solid #F59E0B; }
+.related-node.slow { border-left: 3px solid #F97316; }
+.related-node.failed { border-left: 3px solid #EF4444; }
+.related-node.retry { border-left: 3px solid #3B82F6; }
+.related-node.http-unknown { border-left: 3px solid #94A3B8; }
+
+.related-arrow {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 14px;
 }
 
 .api-details-panel {
@@ -2673,4 +2781,378 @@ body.privacy-active .ts-col {
   flex-direction: column;
   align-items: stretch;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LogRadar Intelligence Brain — Investigation Panel Styles
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── API No-Payload Hint ─────────────────────────────────────────────── */
+.api-no-payload {
+  background: rgba(245,158,11,0.06);
+  border: 1px dashed rgba(245,158,11,0.4);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 11.5px;
+  color: #B45309;
+  line-height: 1.5;
+  font-style: italic;
+}
+.api-no-payload code {
+  background: rgba(245,158,11,0.15);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: 'Fira Code', monospace;
+  font-size: 10.5px;
+  color: #92400E;
+  font-style: normal;
+}
+
+/* ── Brain Investigation Panel ───────────────────────────────────────── */
+.brain-investigation-panel {
+  background: linear-gradient(135deg, #0F0F1A 0%, #1A1025 100%);
+  border: 1px solid rgba(139,92,246,0.25);
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 4px;
+  color: #E2E8F0;
+  font-size: 12.5px;
+}
+
+.brain-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(139,92,246,0.2);
+}
+
+.brain-panel-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.brain-confidence-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid;
+  font-size: 11.5px;
+  font-weight: 700;
+  margin-left: auto;
+}
+
+/* ── Brain Sections ──────────────────────────────────────────────────── */
+.brain-section {
+  margin-bottom: 14px;
+}
+
+.brain-section-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #8B5CF6;
+  margin-bottom: 8px;
+}
+
+.brain-rootcause-text {
+  background: rgba(139,92,246,0.08);
+  border: 1px solid rgba(139,92,246,0.2);
+  border-radius: 8px;
+  padding: 10px 13px;
+  color: #DDD6FE;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* ── Evidence List ───────────────────────────────────────────────────── */
+.brain-evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.brain-evidence-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+.brain-evidence-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.brain-evidence-text {
+  flex: 1;
+  color: #CBD5E1;
+  line-height: 1.4;
+}
+
+.brain-evidence-strength {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 10px;
+  letter-spacing: 0.5px;
+}
+.brain-strength-strong { background: rgba(22,163,74,0.2); color: #4ADE80; }
+.brain-strength-medium { background: rgba(245,158,11,0.2); color: #FCD34D; }
+.brain-strength-weak   { background: rgba(107,114,128,0.2); color: #9CA3AF; }
+
+/* ── Timeline ────────────────────────────────────────────────────────── */
+.brain-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 4px;
+  border-left: 2px solid rgba(139,92,246,0.3);
+}
+
+.brain-timeline-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 8px;
+}
+
+.brain-timeline-dot {
+  flex-shrink: 0;
+  margin-left: -8px;
+}
+
+.brain-timeline-label {
+  color: #CBD5E1;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.brain-timeline-detail {
+  display: block;
+  color: #64748B;
+  font-size: 10.5px;
+  font-family: 'Fira Code', monospace;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+/* ── Causes List ─────────────────────────────────────────────────────── */
+.brain-causes-list {
+  padding-left: 18px;
+  margin: 0;
+  color: #94A3B8;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.brain-cause-item::marker { color: #8B5CF6; }
+
+/* ── Recommendations ─────────────────────────────────────────────────── */
+.brain-rec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.brain-rec-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.brain-rec-priority {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 3px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin-top: 1px;
+}
+.brain-priority-high   { background: rgba(220,38,38,0.2);  color: #F87171; }
+.brain-priority-medium { background: rgba(245,158,11,0.2); color: #FCD34D; }
+.brain-priority-low    { background: rgba(22,163,74,0.2);  color: #4ADE80; }
+
+.brain-rec-content { flex: 1; }
+.brain-rec-action  { color: #DDD6FE; font-size: 12px; font-weight: 500; line-height: 1.4; }
+.brain-rec-why     { color: #64748B; font-size: 11px; margin-top: 3px; font-style: italic; }
+
+/* ── Logger Code Block ───────────────────────────────────────────────── */
+.brain-logger-block {
+  background: #0A0A12;
+  border: 1px solid rgba(56,189,248,0.2);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 4px;
+}
+
+.brain-logger-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #38BDF8;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.brain-logger-code {
+  margin: 0;
+  color: #38BDF8;
+  font-family: 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Confidence Boost ────────────────────────────────────────────────── */
+.brain-boost-block {
+  background: rgba(245,158,11,0.06);
+  border: 1px solid rgba(245,158,11,0.2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 4px;
+}
+
+.brain-boost-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #FCD34D;
+  margin-bottom: 6px;
+}
+
+.brain-boost-item {
+  color: #94A3B8;
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin-bottom: 3px;
+}
+
+/* ── Next Steps ──────────────────────────────────────────────────────── */
+.brain-nextsteps {
+  background: rgba(22,163,74,0.08);
+  border: 1px solid rgba(22,163,74,0.2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #4ADE80;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ── Brain Footer ────────────────────────────────────────────────────── */
+.brain-footer {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(139,92,246,0.15);
+  font-size: 10px;
+  color: #475569;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+
+/* ── Drawer Summary Card ─────────────────────────────────────────────── */
+.brain-drawer-card {
+  background: linear-gradient(135deg, #0F0F1A, #1A1025);
+  border: 1px solid rgba(139,92,246,0.3);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  color: #E2E8F0;
+}
+
+.brain-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 700;
+  font-size: 12.5px;
+}
+
+.brain-drawer-icon { font-size: 15px; }
+
+.brain-drawer-title {
+  flex: 1;
+  color: #DDD6FE;
+}
+
+.brain-drawer-conf {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.brain-drawer-cause {
+  color: #94A3B8;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border-left: 2px solid rgba(139,92,246,0.4);
+}
+
+.brain-drawer-recs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.brain-mini-rec {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 11.5px;
+  color: #CBD5E1;
+}
+
+.brain-mini-priority {
+  flex-shrink: 0;
+  font-size: 8.5px;
+  font-weight: 800;
+  padding: 2px 5px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-top: 1px;
+}
+
+.brain-drawer-nextstep {
+  font-size: 11px;
+  color: #4ADE80;
+  padding: 6px 10px;
+  background: rgba(22,163,74,0.08);
+  border-radius: 6px;
+  border: 1px solid rgba(22,163,74,0.2);
+  line-height: 1.4;
+}
+
+.clickable-step:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.flow-step.selected {
+  background: rgba(59, 130, 246, 0.1) !important;
+  border: 1px dashed rgba(59, 130, 246, 0.3) !important;
+}
+
 

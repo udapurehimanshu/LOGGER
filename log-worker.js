@@ -47,7 +47,7 @@ const WS = {
   threadApiStates: {},
   dbStarts: 0,
   dbEnds: 0,
-  logTypeHints: { flexi: 0, spring: 0, python: 0, node: 0, log4j: 0 },
+  logTypeHints: { flexi: 0, spring: 0, python: 0, node: 0, log4j: 0, oracle: 0, tomcat: 0, java: 0 },
   logType: 'Generic',
   firstTimestamp: null,
   lastTimestamp: null,
@@ -59,6 +59,8 @@ const WS = {
 };
 
 // ─── Regex Patterns ───────────────────────────────────────────────────────────
+const RE_M1_FLEXI = /^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\[(.*?)\]\s+(\S+)\s+-\s+(.+)$/i;
+const RE_M1_FLEXI_B = /^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\[(.*?)\]\s+(.+)$/i;
 const RE_M1  = /^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(\S+)\s+-\s+(.+)$/i;
 const RE_M1B = /^\[(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s*\]\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(.+)$/i;
 const RE_M2  = /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[\.\d]*)\s+\[([^\]]+)\]\s+(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\s+(\S+)\s+-\s+(.+)$/i;
@@ -71,6 +73,10 @@ const RE_RESP_CODE = /Response Code\s*[=:]\s*(4\d{2}|5\d{2})/i;
 // ─── Line Parser ─────────────────────────────────────────────────────────────
 function parseLine(line) {
   let m;
+  m = line.match(RE_M1_FLEXI);
+  if (m) return { timestamp: m[2], thread: m[4], level: m[1].toUpperCase(), source: m[5], message: m[6] };
+  m = line.match(RE_M1_FLEXI_B);
+  if (m) return { timestamp: m[2], thread: m[4], level: m[1].toUpperCase(), source: 'Unknown', message: m[5] };
   m = line.match(RE_M1);
   if (m) return { timestamp: m[2], thread: m[3], level: m[1].toUpperCase(), source: m[4], message: m[5] };
   m = line.match(RE_M1B);
@@ -106,76 +112,408 @@ function classifyWarning(msgL) {
 }
 
 // ─── API Extraction (stateful) ────────────────────────────────────────────────
+// ─── API Extraction (stateful state-machine) ──────────────────────────────────
 function processApiLine(e) {
-  const thread = e.thread;
+  const thread = e.thread || 'main';
   const msg = e.message;
-  if (!WS.threadContexts[thread]) WS.threadContexts[thread] = { currentApi: null };
-  const ctx = WS.threadContexts[thread];
+  const timestamp = e.timestamp || '';
+  
+  if (!WS.threadApiStates[thread]) {
+     WS.threadApiStates[thread] = {
+        state: 'IDLE',
+        api: null,
+        jsonBuffer: '',
+        braceCount: 0,
+     };
+  }
+  const tState = WS.threadApiStates[thread];
 
-  const hasCallWS = msg.includes('callWebService');
-  const hasRunWS  = msg.includes('runWebService');
-  const hasInit   = msg.includes('Initiating API call');
+  const lines = msg.split('\n');
+  for (let line of lines) {
+     line = line.trim();
+     if (!line) continue;
 
-  let nameM = null;
-  if (hasCallWS || hasInit) {
-    nameM = msg.match(/callWebService:name:(\S+)/i) ||
-            msg.match(/Initiating API call:\s*(\S+)/i) ||
-            msg.match(/(\S+)\.callWebService\(\)\s*started/i);
+     // ─── State: RESPONSE_JSON (collecting JSON text) ───
+     if (tState.state === 'RESPONSE_JSON') {
+        tState.jsonBuffer += '\n' + line;
+        
+        for (let i = 0; i < line.length; i++) {
+           if (line[i] === '{') tState.braceCount++;
+           else if (line[i] === '}') tState.braceCount--;
+        }
+
+        if (tState.braceCount <= 0) {
+           tState.api.response = tState.jsonBuffer;
+           try {
+              const parsedJson = JSON.parse(tState.jsonBuffer);
+              if (parsedJson.count !== undefined) {
+                 tState.api.recordCount = parsedJson.count;
+              } else if (Array.isArray(parsedJson.items)) {
+                 tState.api.recordCount = parsedJson.items.length;
+              } else if (parsedJson.records !== undefined) {
+                 tState.api.recordCount = parsedJson.records;
+              }
+              
+              if (parsedJson.links && Array.isArray(parsedJson.links)) {
+                 const mainLink = parsedJson.links.find(lnk => lnk.rel === 'self' || lnk.rel === 'canonical') || parsedJson.links[0];
+                 if (mainLink && mainLink.href) {
+                    tState.api.endpoint = mainLink.href;
+                    try {
+                       const parts = mainLink.href.split('?')[0].split('/').filter(Boolean);
+                       if (parts.length) {
+                          tState.api.name = parts[parts.length - 1].toUpperCase() + "_WS";
+                       }
+                    } catch(err) {}
+                 }
+                 tState.api.relatedUrls = parsedJson.links.map(lnk => lnk.href).filter(Boolean);
+              }
+           } catch(err) {
+              const countM = tState.jsonBuffer.match(/"count"\s*:\s*(\d+)/i);
+              if (countM) tState.api.recordCount = parseInt(countM[1]);
+              
+              const hrefM = tState.jsonBuffer.match(/"href"\s*:\s*"([^"]+)"/);
+              if (hrefM) {
+                 tState.api.endpoint = hrefM[1];
+                 try {
+                    const parts = hrefM[1].split('?')[0].split('/').filter(Boolean);
+                    if (parts.length) {
+                       tState.api.name = parts[parts.length - 1].toUpperCase() + "_WS";
+                    }
+                 } catch(err) {}
+              }
+           }
+           
+           finalizeAndPushApi(tState.api);
+           tState.state = 'IDLE';
+           tState.api = null;
+           tState.jsonBuffer = '';
+           tState.braceCount = 0;
+        }
+        continue;
+     }
+
+     // ─── Detect API Start patterns ───
+     const hasStartPattern = 
+        line.includes('.runWebService') ||
+        /\b[A-Za-z0-9_]+\.runWebService\b/i.test(line) ||
+        line.includes('callWebService') ||
+        line.includes('Executing API') ||
+        line.includes('HTTP Request') ||
+        line.includes('RestTemplate') ||
+        line.includes('HttpURLConnection') ||
+        line.includes('WebClient') ||
+        line.includes('axios') ||
+        line.includes('fetch(') ||
+        /\b(GET|POST|PUT|DELETE|PATCH)\s+https?:\/\/\S+/i.test(line);
+
+     if (hasStartPattern) {
+        if (tState.api) {
+           finalizeAndPushApi(tState.api);
+        }
+
+        let apiName = 'API_CALL';
+        let method = 'GET';
+        let endpoint = null;
+
+        const runWsM = line.match(/([A-Za-z0-9_]+)\.runWebService/i);
+        if (runWsM) {
+           apiName = runWsM[1].toUpperCase() + "_WS";
+        }
+         const callWsM = line.match(/callWebService:name:([A-Za-z0-9_]+)/i) || 
+                         line.match(/callWebService\(\s*['"]?([A-Za-z0-9_]+)['"]?/i);
+         if (callWsM) {
+            apiName = callWsM[1].toUpperCase();
+         }
+
+        const methodM = line.match(/\b(GET|POST|PUT|DELETE|PATCH)\b/i);
+        if (methodM) {
+           method = methodM[1].toUpperCase();
+        }
+
+        const urlM = line.match(/https?:\/\/\S+/i);
+        if (urlM) {
+           endpoint = urlM[0];
+        }
+
+        tState.api = {
+           name: apiName,
+           method: method,
+           endpoint: endpoint,
+           status: 'Unknown (Not Logged)',
+           ms: 'Unknown',
+           request: 'NOT LOGGED',
+           response: 'NOT LOGGED',
+           headers: {},
+           correlationId: null,
+           timestamp: timestamp,
+           thread: thread,
+           logIndex: e.id,
+           retryCount: 0,
+           relatedUrls: []
+        };
+        tState.state = 'API_START';
+     }
+
+     if (line.includes('runWebService') && line.includes('result') && !tState.api) {
+        tState.api = {
+           name: 'WORK_ORDER_WS',
+           method: 'GET',
+           endpoint: null,
+           status: 'Unknown (Not Logged)',
+           ms: 'Unknown',
+           request: 'NOT LOGGED',
+           response: 'NOT LOGGED',
+           headers: {},
+           correlationId: null,
+           timestamp: timestamp,
+           thread: thread,
+           logIndex: e.id,
+           retryCount: 0,
+           relatedUrls: []
+        };
+        tState.state = 'API_START';
+     }
+
+     if (!tState.api) continue;
+
+     // ─── Parse metadata inside session ───
+     const timeM = line.match(/Total time\s*[=:]\s*(\d+)/i) || 
+                   line.match(/Execution Time\s*[=:]\s*(\d+)/i) ||
+                   line.match(/Completed in\s*(\d+)\s*ms/i) ||
+                   line.match(/elapsed\s*[=:]\s*(\d+)/i);
+     if (timeM) {
+        tState.api.ms = parseInt(timeM[1]);
+     }
+
+     const statusM = line.match(/Response Code\s*[=:]\s*(\d+)/i) || 
+                     line.match(/HTTP\s+(\d{3})\b/i) ||
+                     line.match(/HTTP Response Code\s*:\s*(\d+)/i);
+     if (statusM) {
+        tState.api.status = parseInt(statusM[1]);
+     }
+
+     const corrM = line.match(/correlation-id\s*[=:]\s*([^\s,\]]+)/i) || 
+                   line.match(/correlationId\s*[=:]\s*([^\s,\]]+)/i);
+     if (corrM) {
+        tState.api.correlationId = corrM[1].replace(/[\[\]]/g, '');
+     }
+
+     const urlM2 = line.match(/URL\s*=\s*(https?:\/\/\S+)/i) || 
+                   line.match(/Endpoint\s*:\s*(\S+)/i);
+     if (urlM2) {
+        tState.api.endpoint = urlM2[1];
+     }
+
+     if (line.includes('Authorization:') || line.toLowerCase().includes('authorization')) {
+        const authM = line.match(/Authorization:\s*(Bearer\s+\S+|Basic\s+\S+|\S+)/i);
+        if (authM) tState.api.headers['Authorization'] = authM[1];
+     }
+     if (line.includes('Content-Type:') || line.toLowerCase().includes('content-type')) {
+        const ctM = line.match(/Content-Type:\s*(\S+)/i);
+        if (ctM) tState.api.headers['Content-Type'] = ctM[1];
+     }
+
+     if (line.includes('Request Payload:') || line.includes('_request:') || line.includes('payload=')) {
+        const payM = line.match(/Request Payload\s*:\s*(.+)$/i) || 
+                     line.match(/_request\s*:\s*(.+)$/i) ||
+                     line.match(/payload\s*=\s*(.+)$/i);
+        if (payM) {
+           tState.api.request = payM[1].trim();
+        }
+     }
+
+     if (line.toLowerCase().includes('retry') || line.toLowerCase().includes('retrying')) {
+        tState.api.retryCount = (tState.api.retryCount || 0) + 1;
+     }
+
+      const hasResult = line.includes('runWebService') && line.includes('result');
+      const braceIdx = line.indexOf('{');
+      
+      if (hasResult && braceIdx !== -1) {
+         tState.state = 'RESPONSE_JSON';
+        tState.jsonBuffer = line.substring(braceIdx);
+        tState.braceCount = 0;
+        for (let i = braceIdx; i < line.length; i++) {
+           if (line[i] === '{') tState.braceCount++;
+           else if (line[i] === '}') tState.braceCount--;
+        }
+
+        if (tState.braceCount <= 0) {
+           tState.api.response = tState.jsonBuffer;
+           try {
+              const parsedJson = JSON.parse(tState.jsonBuffer);
+              if (parsedJson.count !== undefined) {
+                 tState.api.recordCount = parsedJson.count;
+              } else if (Array.isArray(parsedJson.items)) {
+                 tState.api.recordCount = parsedJson.items.length;
+              }
+              
+              if (parsedJson.links && Array.isArray(parsedJson.links)) {
+                 const mainLink = parsedJson.links[0];
+                 if (mainLink && mainLink.href) {
+                    tState.api.endpoint = mainLink.href;
+                 }
+              }
+           } catch(e) {}
+           
+           finalizeAndPushApi(tState.api);
+           tState.state = 'IDLE';
+           tState.api = null;
+           tState.jsonBuffer = '';
+           tState.braceCount = 0;
+        }
+     }
   }
-  let runWsStart = null;
-  if (!nameM && hasRunWS) {
-    runWsStart = msg.match(/^([A-Za-z0-9_]+)\.runWebService\s*$/i);
-    if (!runWsStart) runWsStart = msg.match(/[\s\-]([A-Za-z0-9_]+)\.runWebService\s*$/i);
+}
+
+function finalizeAndPushApi(api) {
+  if (!api) return;
+
+  if (!api.method || api.method === 'Unknown') {
+     if (api.endpoint && (api.endpoint.includes('q=') || api.endpoint.includes('fields=') || api.endpoint.includes('onlyData=true'))) {
+        api.method = 'GET';
+     } else {
+        api.method = 'Unknown';
+     }
   }
 
-  if (nameM || runWsStart) {
-    const apiName = nameM ? nameM[1] : runWsStart[1];
-    if (ctx.currentApi) WS.apis.push(ctx.currentApi);
-    ctx.currentApi = {
-      name: apiName, endpoint: null, method: 'GET',
-      status: null, ms: 0, request: null, response: null,
-      timestamp: e.timestamp, thread, logIndex: e.id,
-    };
-    return;
+  let countVal = api.recordCount;
+  if (api.response && api.response !== 'NOT LOGGED') {
+     const trimResp = api.response.trim();
+     if (trimResp === '[]' || trimResp === '{}') {
+        countVal = 0;
+     } else if (trimResp.startsWith('{') || trimResp.startsWith('[')) {
+        try {
+           const parsed = JSON.parse(trimResp);
+           if (Array.isArray(parsed)) {
+              countVal = parsed.length;
+           } else if (parsed && typeof parsed === 'object') {
+              if (parsed.count !== undefined) countVal = Number(parsed.count);
+              else if (parsed.total !== undefined) countVal = Number(parsed.total);
+              else if (parsed.size !== undefined) countVal = Number(parsed.size);
+              else if (parsed.records !== undefined) countVal = Number(parsed.records);
+              else if (Array.isArray(parsed.items)) countVal = parsed.items.length;
+              else if (Array.isArray(parsed.data)) countVal = parsed.data.length;
+           }
+        } catch(e) {}
+     }
+  }
+  if (countVal === undefined || countVal === null) {
+     countVal = 'Unknown';
+  }
+  api.recordCount = countVal;
+
+  let isBlank = (countVal === 0 || countVal === '0');
+
+  if ((!api.status || api.status === 'Unknown (Not Logged)') && api.response && api.response !== 'NOT LOGGED' && api.response !== 'N/A') {
+     api.status = 'HTTP Status Not Logged';
   }
 
-  if (!ctx.currentApi) return;
+  let statusStr = String(api.status || '');
+  let httpCode = null;
+  if (/^\d+$/.test(statusStr)) {
+     httpCode = parseInt(statusStr);
+  }
 
-  if (msg.includes('URL') || msg.includes('Endpoint')) {
-    const urlM = msg.match(/URL\s*=\s*(https?:\/\/\S+)/i) || msg.match(/URL\s*=\s*(\S+)/i);
-    if (urlM) ctx.currentApi.endpoint = urlM[1];
+  let businessStatus = 'Unknown';
+  let businessResult = 'Unknown';
+
+  if (httpCode === 200 || api.status === 'HTTP Status Not Logged') {
+     if (isBlank) {
+        businessStatus = 'Blank Response';
+        businessResult = 'Success (Empty)';
+     } else {
+        businessStatus = 'Business Success';
+        businessResult = 'Business Success';
+     }
+  } else if (httpCode === 401) {
+     businessStatus = 'Authentication Failed';
+     businessResult = 'Authentication Error (HTTP 401)';
+  } else if (httpCode === 403) {
+     businessStatus = 'Permission Issue';
+     businessResult = 'Permission Denied';
+  } else if (httpCode === 404) {
+     businessStatus = 'Endpoint Missing';
+     businessResult = 'Not Found';
+  } else if (httpCode >= 500) {
+     businessStatus = 'Server Error';
+     businessResult = 'Internal Error';
+  } else if (api.status === 'Timeout' || (typeof api.ms === 'number' && api.ms >= 10000)) {
+     businessStatus = 'Network Issue';
+     businessResult = 'Timeout';
+  } else if (httpCode >= 400 && httpCode < 500) {
+     businessStatus = 'Client Error';
+     businessResult = 'Bad Request';
+  } else {
+     if (api.response && api.response !== 'NOT LOGGED' && api.response !== 'N/A') {
+        if (isBlank) {
+           businessStatus = 'Blank Response';
+           businessResult = 'Success (Empty)';
+        } else {
+           businessStatus = 'Business Success';
+           businessResult = 'Business Success';
+        }
+     } else {
+        businessStatus = 'Unknown';
+        businessResult = 'Not Logged';
+     }
   }
-  if (msg.includes('Request Method')) {
-    const mM = msg.match(/Request Method\s*=\s*(\S+)/i);
-    if (mM) ctx.currentApi.method = mM[1];
+
+  if (api.retryCount > 0) {
+     businessStatus = 'Retry';
   }
-  if (msg.includes('Response Code') || msg.includes('HTTP Response Code')) {
-    const sM = msg.match(/Response Code\s*[=:]\s*(\d+)/i) || msg.match(/HTTP Response Code\s*:\s*(\d+)/i);
-    if (sM) ctx.currentApi.status = parseInt(sM[1]);
+
+  api.businessStatus = businessStatus;
+  api.businessResult = businessResult;
+
+  let perfRating = 'N/A';
+  if (typeof api.ms === 'number') {
+     const ms = api.ms;
+     if (ms <= 500) perfRating = 'Excellent';
+     else if (ms <= 1000) perfRating = 'Good';
+     else if (ms <= 2000) perfRating = 'Average';
+     else if (ms <= 5000) perfRating = 'Slow';
+     else perfRating = 'Critical';
   }
-  if (hasRunWS && msg.includes('result')) {
-    const rsM = msg.match(/\.runWebService:\s*result\s+(\d{3})/i);
-    if (rsM) {
-      ctx.currentApi.status = parseInt(rsM[1]);
-      const bi = msg.indexOf('{', msg.indexOf('result'));
-      if (bi !== -1) ctx.currentApi.response = msg.substring(bi, bi + 2000);
-    }
+  api.performanceRating = perfRating;
+
+  let rec = 'No action required.';
+  if (businessStatus === 'Blank Response') {
+     rec = 'Verify filters. Verify Organization. Verify Item. Verify Query Parameters. Verify Data Exists.';
+  } else if (httpCode === 403 || businessStatus === 'Permission Issue') {
+     rec = 'Check Roles. Check Security. Check User Privileges.';
+  } else if (httpCode >= 500 || businessStatus === 'Server Error') {
+     rec = 'Check Server Logs. Check Exception Stack. Check Payload.';
+  } else if (api.status === 'Timeout' || (typeof api.ms === 'number' && api.ms > 10000) || businessStatus === 'Network Issue') {
+     rec = 'Retry. Check Network. Increase Timeout.';
   }
-  if (msg.includes('Total time')) {
-    const tM = msg.match(/Total time\s*=\s*(\d+)/i);
-    if (tM) ctx.currentApi.ms = parseInt(tM[1]);
-  } else if (hasCallWS) {
-    const tM = msg.match(/callWebService\(\)\s*:\s*(\d+)/i);
-    if (tM) ctx.currentApi.ms = parseInt(tM[1]);
+  api.recommendation = rec;
+
+  if (!api.request || api.request === 'N/A' || api.request === 'NOT LOGGED') {
+     api.request = 'NOT LOGGED';
   }
-  if (msg.includes('Response Body')) {
-    const rM = msg.match(/Response Body\s*:\s*(.+)$/is);
-    if (rM) ctx.currentApi.response = rM[1].substring(0, 2000);
+
+  let health = 'Success';
+  if (api.status === 'Timeout' || (typeof api.ms === 'number' && api.ms >= 10000)) {
+     health = 'Failed';
+  } else if (httpCode >= 400) {
+     health = 'Failed';
+  } else if (api.retryCount > 0) {
+     health = 'Retry';
+  } else if (isBlank) {
+     health = 'Blank';
+  } else if (typeof api.ms === 'number' && api.ms > 2000) {
+     health = 'Slow';
+  } else if (api.status === 'Unknown (Not Logged)' || api.status === 'HTTP Status Not Logged') {
+     if (api.response && api.response !== 'NOT LOGGED') {
+        health = isBlank ? 'Blank' : 'Success';
+     } else {
+        health = 'HTTP Unknown';
+     }
   }
-  if (hasRunWS && msg.includes('Total time') && ctx.currentApi) {
-    WS.apis.push(ctx.currentApi);
-    ctx.currentApi = null;
-  }
+  api.health = health;
+
+  WS.apis.push(api);
 }
 
 // ─── Process a completed log entry ────────────────────────────────────────────
@@ -202,6 +540,9 @@ function processEntry(e) {
   if (msgL.includes('traceback (most recent call last)')) WS.logTypeHints.python++;
   if (msgL.includes('node_modules') || msgL.includes('node:internal')) WS.logTypeHints.node++;
   if (msgL.includes('log4j') || msgL.includes('org.apache.log4j')) WS.logTypeHints.log4j++;
+  if (msgL.includes('oracle') || msgL.includes('ora-') || msgL.includes('jdbc.driver')) WS.logTypeHints.oracle++;
+  if (msgL.includes('tomcat') || msgL.includes('catalina') || msgL.includes('org.apache.catalina')) WS.logTypeHints.tomcat++;
+  if (msgL.includes('java.lang') || msgL.includes('exception') || msgL.includes('nullpointerexception')) WS.logTypeHints.java++;
 
   const msg = e.message;
   const uM = msg.match(/User:\s*([A-Z0-9_]+)/i); if (uM) WS.users.add(uM[1]);
@@ -273,10 +614,10 @@ function processChunk(text, isLast) {
 // ─── Finalize after all chunks ────────────────────────────────────────────────
 function finalizeState() {
   // Flush remaining open API contexts
-  for (const t in WS.threadContexts) {
-    if (WS.threadContexts[t].currentApi) {
-      WS.apis.push(WS.threadContexts[t].currentApi);
-      WS.threadContexts[t].currentApi = null;
+  for (const t in WS.threadApiStates) {
+    if (WS.threadApiStates[t].api) {
+      finalizeAndPushApi(WS.threadApiStates[t].api);
+      WS.threadApiStates[t].api = null;
     }
   }
 
@@ -284,6 +625,9 @@ function finalizeState() {
   const h = WS.logTypeHints;
   if (h.flexi > 0) WS.logType = 'Flexi Runtime';
   else if (h.spring > 0) WS.logType = 'Spring Boot';
+  else if (h.tomcat > 0) WS.logType = 'Apache Tomcat';
+  else if (h.oracle > 0) WS.logType = 'Oracle Database';
+  else if (h.java > 0)   WS.logType = 'Java Application';
   else if (h.python > 0) WS.logType = 'Python';
   else if (h.node > 0)   WS.logType = 'NodeJS';
   else if (h.log4j > 0)  WS.logType = 'Apache Log4j';
@@ -296,21 +640,15 @@ function finalizeState() {
   // Post-process APIs
   WS.apis.forEach(api => {
     if (!api.status) api.status = 200;
-    if (!api.businessResult) {
-      if (api.status >= 400) { api.businessResult = `Failed (HTTP ${api.status})`; }
-      else if (api.response) {
-        const r = api.response;
-        if (r.includes('"success":false') || r.includes('"valid":false')) api.businessResult = 'Business Validation Failure';
-        else if (r.trim() === '[]' || r.trim() === '{}' || /\"count\"\s*:\s*0\b/i.test(r) || /\"items\"\s*:\s*\[\s*\]/i.test(r)) api.businessResult = 'Blank Response';
-        else api.businessResult = 'Healthy';
-      } else api.businessResult = 'Healthy';
+    
+    // Auto-fill query params from URL if not already done
+    if (api.endpoint && api.endpoint.includes('?')) {
+      const qIdx = api.endpoint.indexOf('?');
+      api.queryParams = api.endpoint.substring(qIdx + 1);
     }
-    if (!api.endpoint && api.response) {
-      const hM = api.response.match(/"href"\s*:\s*"([^"]+)"/i);
-      if (hM) api.endpoint = hM[1];
-    }
+
     if (api.response) {
-      const cM = api.response.match(/"count"\s*:\s*(\d+)/i);
+      const cM = api.response.match(/"count"\s*:\s*(\d+)/i) || api.response.match(/"result_count"\s*:\s*(\d+)/i);
       if (cM) api.recordCount = parseInt(cM[1]);
       else {
         const iM = api.response.match(/"items"\s*:\s*\[([^\]]*)\]/i);
@@ -318,13 +656,68 @@ function finalizeState() {
         else api.recordCount = null;
       }
     } else api.recordCount = null;
+
+    if (!api.businessResult) {
+      if (api.status >= 400) { api.businessResult = `Failed (HTTP ${api.status})`; }
+      else if (api.response) {
+        const r = api.response;
+        if (r.includes('"success":false') || r.includes('"valid":false')) api.businessResult = 'Business Validation Failure';
+        else if (r.trim() === '[]' || r.trim() === '{}' || api.recordCount === 0 || /\"count\"\s*:\s*0\b/i.test(r) || /\"items\"\s*:\s*\[\s*\]/i.test(r)) api.businessResult = 'Blank Response';
+        else api.businessResult = 'Healthy';
+      } else api.businessResult = 'Healthy';
+    }
+    if (!api.endpoint && api.response) {
+      const hM = api.response.match(/"href"\s*:\s*"([^"]+)"/i);
+      if (hM) api.endpoint = hM[1];
+    }
+
+    // Health Classification
+    let health = 'Healthy';
+    const isTimeout = api.status === 504 || api.ms >= 30000 || (api.response && api.response.toLowerCase().includes('timeout'));
+    if (isTimeout) {
+      health = 'Timeout';
+    } else if (api.status >= 400) {
+      health = 'Failed';
+    } else if (api.retryCount > 0) {
+      health = 'Retry';
+    } else if (api.businessResult === 'Blank Response') {
+      health = 'Blank Response';
+    } else if (api.ms > 2000) {
+      health = 'Slow';
+    } else {
+      health = 'Healthy';
+    }
+    api.health = health;
   });
 
-  const blankApis = WS.apis.filter(api => {
-    if (api.status !== 200 || !api.response) return false;
-    const r = api.response.trim();
-    return r === '[]' || r === '{}' || /\"count\"\s*:\s*0\b/i.test(r) || /\"items\"\s*:\s*\[\s*\]/i.test(r);
-  }).map(api => ({ name: api.name, endpoint: api.endpoint || 'Unknown', status: api.status, ms: api.ms, blankReason: 'Empty or zero-count response', recommendation: 'Verify query criteria and that records exist.' }));
+  const blankApis = WS.apis.filter(api => api.health === 'Blank Response').map(api => {
+    let reason = 'Empty response body';
+    let rec = 'Verify query criteria. Ensure the underlying database contains active records for this entity.';
+    if (api.response) {
+      const r = api.response.trim();
+      if (r === '[]' || r === '{}') {
+        reason = 'Empty response body';
+      } else if (/\"count\"\s*:\s*0\b/i.test(r) && /\"items\"\s*:\s*\[\s*\]/i.test(r)) {
+        reason = 'Empty items list with count 0';
+        rec = 'Query executed successfully but returned zero results. Check if search filters are too restrictive.';
+      } else if (/\"count\"\s*:\s*0\b/i.test(r)) {
+        reason = 'Response count field is 0';
+        rec = 'Verify if search filter fields (like organization code or item reference) match valid active records.';
+      } else if (/\"items\"\s*:\s*\[\s*\]/i.test(r)) {
+        reason = 'Items array is empty';
+        rec = 'Check query parameter values. If user has data-level restrictions, Oracle may return 200 with an empty list.';
+      }
+    }
+    return {
+      name: api.name,
+      endpoint: api.endpoint || 'Unknown',
+      status: api.status,
+      ms: api.ms,
+      blankReason: reason,
+      recommendation: rec,
+      logIndex: api.logIndex
+    };
+  });
 
   const loggerGaps = [];
   for (const t in WS.threadApiStates) {
@@ -401,7 +794,7 @@ self.onmessage = function (ev) {
       logCounts: { FATAL: 0, ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, TRACE: 0 },
       totalLines: 0, threadContexts: {}, threadLastTimes: {}, threadApiStates: {},
       dbStarts: 0, dbEnds: 0,
-      logTypeHints: { flexi: 0, spring: 0, python: 0, node: 0, log4j: 0 },
+      logTypeHints: { flexi: 0, spring: 0, python: 0, node: 0, log4j: 0, oracle: 0, tomcat: 0, java: 0 },
       logType: 'Generic', firstTimestamp: null, lastTimestamp: null,
       users: new Set(), screen: null, transaction: null, module: null, moduleScores: {},
     });

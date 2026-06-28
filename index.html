@@ -8,6 +8,11 @@
   <meta name="description"
     content="Enterprise-grade AI log analysis platform. Universal root cause analysis, risk detection, and fix recommendations for any application, framework, or integration.">
   <link rel="stylesheet" href="index.css?v=debugger_v3">
+  <!-- Monaco Editor Loader -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
+  <script>
+    require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
+  </script>
 </head>
 
 <body>
@@ -176,7 +181,18 @@
         </svg>
         Screen Debugger
       </button>
-
+      
+      <button class="nav-item" data-view="graph" id="nav-graph">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <circle cx="18" cy="5" r="3" />
+          <circle cx="6" cy="12" r="3" />
+          <circle cx="18" cy="19" r="3" />
+          <line x1="8.5" y1="10.5" x2="15.5" y2="6.5" />
+          <line x1="8.5" y1="13.5" x2="15.5" y2="17.5" />
+        </svg>
+        Investigation Graph
+      </button>
+ 
       <button class="nav-item" data-view="askai" id="nav-askai">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -239,6 +255,10 @@
         <span id="log-type-badge" class="log-type-badge" style="display:none; margin-left: 8px;"></span>
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
+        <!-- Brain Mode Indicator -->
+        <div id="brain-mode-badge" style="display:flex;align-items:center;gap:5px;background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.3);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;color:#A78BFA;letter-spacing:0.5px;">
+          🧠 Brain Active
+        </div>
         <!-- Privacy Mode Toggle -->
         <button class="privacy-toggle" id="privacy-toggle" title="Toggle Privacy Mode — mask sensitive data">
           <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -576,6 +596,139 @@
           </div>
         </div>
 
+        <!-- Integration & API Metrics Dashboard Section (V2) -->
+        <div class="dash-grid-title" style="margin: 24px 0 12px 0; font-size:15px; font-weight:700; color:var(--primary); display:flex; align-items:center; gap:8px;">
+          <span>📊</span> Integration & API Performance Dashboard
+        </div>
+
+        <!-- Top API Stats Row -->
+        <div class="dash-grid" style="margin-bottom:16px;">
+          <div class="stat-card" style="border-left: 4px solid var(--primary); padding: 12px 16px;">
+            <div class="stat-card-label" style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Total API Calls</div>
+            <div class="stat-card-value" id="api-stat-total" style="font-size:20px; font-weight:700; margin: 4px 0;">0</div>
+            <div class="stat-card-sub" style="font-size:10px; color:var(--text-muted);">Outbound invocations</div>
+          </div>
+          <div class="stat-card" style="border-left: 4px solid #16A34A; padding: 12px 16px;">
+            <div class="stat-card-label" style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Successful Calls</div>
+            <div class="stat-card-value" id="api-stat-success" style="font-size:20px; font-weight:700; margin: 4px 0;">0</div>
+            <div class="stat-card-sub" style="font-size:10px; color:var(--text-muted);">HTTP 200 / Business Success</div>
+          </div>
+          <div class="stat-card" style="border-left: 4px solid #F59E0B; padding: 12px 16px;">
+            <div class="stat-card-label" style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Blank Responses</div>
+            <div class="stat-card-value" id="api-stat-blank" style="font-size:20px; font-weight:700; margin: 4px 0;">0</div>
+            <div class="stat-card-sub" style="font-size:10px; color:var(--text-muted);">No records returned</div>
+          </div>
+          <div class="stat-card" style="border-left: 4px solid #DC2626; padding: 12px 16px;">
+            <div class="stat-card-label" style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Failed Calls</div>
+            <div class="stat-card-value" id="api-stat-failed" style="font-size:20px; font-weight:700; margin: 4px 0;">0</div>
+            <div class="stat-card-sub" style="font-size:10px; color:var(--text-muted);">HTTP Error Code / Failures</div>
+          </div>
+          <div class="stat-card" style="border-left: 4px solid #0891B2; padding: 12px 16px;">
+            <div class="stat-card-label" style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Slow Calls</div>
+            <div class="stat-card-value" id="api-stat-slow" style="font-size:20px; font-weight:700; margin: 4px 0;">0</div>
+            <div class="stat-card-sub" style="font-size:10px; color:var(--text-muted);">&gt;2000ms latency</div>
+          </div>
+          <div class="stat-card" style="border-left: 4px solid #8B5CF6; padding: 12px 16px;">
+            <div class="stat-card-label" style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Average Time</div>
+            <div class="stat-card-value" id="api-stat-avg" style="font-size:20px; font-weight:700; margin: 4px 0;">0ms</div>
+            <div class="stat-card-sub" style="font-size:10px; color:var(--text-muted);">Mean response latency</div>
+          </div>
+          <div class="stat-card" style="border-left: 4px solid #EC4899; padding: 12px 16px;">
+            <div class="stat-card-label" style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Records Returned</div>
+            <div class="stat-card-value" id="api-stat-total-records" style="font-size:20px; font-weight:700; margin: 4px 0;">0</div>
+            <div class="stat-card-sub" style="font-size:10px; color:var(--text-muted);">Total cumulative records</div>
+          </div>
+          <div class="stat-card" style="border-left: 4px solid #10B981; padding: 12px 16px;">
+            <div class="stat-card-label" style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Max Record Count</div>
+            <div class="stat-card-value" id="api-stat-highest-record" style="font-size:20px; font-weight:700; margin: 4px 0;">0</div>
+            <div class="stat-card-sub" style="font-size:10px; color:var(--text-muted);">Highest single payload size</div>
+          </div>
+        </div>
+
+        <!-- Middle API Lists Grid -->
+        <div class="dash-grid" style="margin-bottom:16px;">
+          <!-- Slowest APIs -->
+          <div class="card" style="margin-bottom:0; min-height: 250px;">
+            <div class="card-title" style="color:#EF4444; font-size:13px; font-weight:700; margin-bottom:12px;">
+              ⚠️ Slowest APIs (Top 10)
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="group-table" style="width:100%; border-collapse:collapse; font-size:12px;">
+                <thead>
+                  <tr style="text-align:left; border-bottom:1px solid var(--border); color:var(--text-muted);">
+                    <th style="padding:6px 8px;">API Name</th>
+                    <th style="padding:6px 8px;">Time</th>
+                    <th style="padding:6px 8px;">Threshold</th>
+                    <th style="padding:6px 8px;">Recommendation</th>
+                  </tr>
+                </thead>
+                <tbody id="api-dashboard-slowest">
+                  <tr><td colspan="4" style="text-align:center; padding:24px; color:var(--text-muted);">No slow APIs detected</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Blank APIs -->
+          <div class="card" style="margin-bottom:0; min-height: 250px;">
+            <div class="card-title" style="color:#F59E0B; font-size:13px; font-weight:700; margin-bottom:12px;">
+              🔍 Blank APIs (Top 10)
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="group-table" style="width:100%; border-collapse:collapse; font-size:12px;">
+                <thead>
+                  <tr style="text-align:left; border-bottom:1px solid var(--border); color:var(--text-muted);">
+                    <th style="padding:6px 8px;">API Name</th>
+                    <th style="padding:6px 8px;">URL</th>
+                    <th style="padding:6px 8px;">Count</th>
+                    <th style="padding:6px 8px;">Time</th>
+                    <th style="padding:6px 8px;">Recommendation</th>
+                  </tr>
+                </thead>
+                <tbody id="api-dashboard-blank">
+                  <tr><td colspan="5" style="text-align:center; padding:24px; color:var(--text-muted);">No blank APIs detected</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fastest APIs -->
+        <div class="dash-grid" style="grid-template-columns: 1fr; margin-bottom:16px;">
+          <div class="card" style="margin-bottom:0;">
+            <div class="card-title" style="color:#10B981; font-size:13px; font-weight:700; margin-bottom:12px;">
+              ⚡ Fastest APIs (Top 10)
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="group-table" style="width:100%; border-collapse:collapse; font-size:12px;">
+                <thead>
+                  <tr style="text-align:left; border-bottom:1px solid var(--border); color:var(--text-muted);">
+                    <th style="padding:6px 8px;">API Name</th>
+                    <th style="padding:6px 8px;">Time</th>
+                    <th style="padding:6px 8px;">Calls</th>
+                    <th style="padding:6px 8px;">Average</th>
+                  </tr>
+                </thead>
+                <tbody id="api-dashboard-fastest">
+                  <tr><td colspan="4" style="text-align:center; padding:24px; color:var(--text-muted);">No APIs detected</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Execution Timeline -->
+        <div class="dash-grid" style="grid-template-columns: 1fr; margin-bottom:16px;">
+          <div class="card" style="margin-bottom:0;">
+            <div class="card-title" style="font-size:13px; font-weight:700; margin-bottom:12px;">
+              🛤️ Execution Flow Timeline
+            </div>
+            <div id="api-dashboard-timeline" style="display:flex; align-items:center; gap:8px; overflow-x:auto; padding:20px 16px; background:rgba(0,0,0,0.15); border-radius:8px; min-height:80px; scrollbar-width:thin;">
+              <div style="width:100%; text-align:center; color:var(--text-muted);">Upload log files to render execution sequence</div>
+            </div>
+          </div>
+        </div>
+
       </div><!-- /dashboard -->
 
       <!-- ═══════════ ANALYZER VIEW ═══════════ -->
@@ -666,7 +819,23 @@
                 </div>
               </div>
 
-              <!-- Code Execution Investigator Report Card -->
+              <!-- Surrounding Log Viewer & AI Analysis Card -->
+              <div class="rca-card" id="ds-log-viewer-card" style="border-left: 3px solid #EF4444; background: var(--card-bg); padding: 16px;">
+                <div class="rca-card-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span>📝 Surrounding Log Snippet Viewer</span>
+                  <div style="display: flex; gap: 6px;">
+                    <button id="rca-log-copy-btn" class="prop-script-btn" style="padding: 2px 6px; font-size: 10.5px; border-radius: 4px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-light); cursor: pointer;">Copy</button>
+                    <button id="rca-log-download-btn" class="prop-script-btn" style="padding: 2px 6px; font-size: 10.5px; border-radius: 4px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-light); cursor: pointer;">Download</button>
+                  </div>
+                </div>
+                <div id="rca-monaco-container" style="height: 200px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #0F172A; margin-bottom: 12px;"></div>
+                
+                <div class="rca-section-title-sub" style="font-size: 11px; font-weight: 700; color: #8B5CF6; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">AI Analysis &amp; Explanation</div>
+                <div id="rca-ai-analysis-text" style="font-size: 12px; color: var(--text-normal); line-height: 1.5; padding: 10px; background: rgba(139,92,246,0.04); border: 1px solid rgba(139,92,246,0.15); border-radius: 6px; margin-bottom: 12px; white-space: pre-wrap; font-family: inherit;"></div>
+
+                <div class="rca-section-title-sub" style="font-size: 11px; font-weight: 700; color: #10B981; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Related Components (Correlation Chain)</div>
+                <div id="rca-correlation-chain" style="display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 8px; border-radius: 6px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); scrollbar-width: thin;"></div>
+              </div>
               <div class="rca-card" id="ds-investigator-report" style="border-left: 3px solid #60A5FA; background: #0F172A; color: #E2E8F0; display: none; padding: 16px;">
                 <div class="rca-card-title" style="color: #60A5FA; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
                   <span>🔍</span> Code Execution Investigator Report
@@ -894,21 +1063,94 @@
 
         <div class="api-tracker-layout">
           <!-- API List Panel -->
-          <div class="api-list-panel">
-            <div class="api-list-header">
-              <div class="search-wrap">
-                <input class="search-input" type="text" id="api-search-input" placeholder="Filter by API name or status...">
-                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
+          <div class="api-list-panel" style="display: flex; flex-direction: column; overflow: hidden; height: 100%;">
+            
+            <!-- Horizontal Tabs -->
+            <div class="api-tabs" style="display: flex; border-bottom: 1px solid var(--border); margin-bottom: 12px; gap: 4px;">
+              <button class="api-tab-btn active" data-tab="list" style="flex: 1; padding: 10px; background: none; border: none; color: var(--text-light); font-weight: 700; border-bottom: 2px solid var(--primary); cursor: pointer; font-size: 12.5px; transition: all 0.2s;">API List</button>
+              <button class="api-tab-btn" data-tab="blank" style="flex: 1; padding: 10px; background: none; border: none; color: var(--text-muted); font-weight: 600; cursor: pointer; font-size: 12.5px; transition: all 0.2s;">Blank Responses</button>
+              <button class="api-tab-btn" data-tab="stats" style="flex: 1; padding: 10px; background: none; border: none; color: var(--text-muted); font-weight: 600; cursor: pointer; font-size: 12.5px; transition: all 0.2s;">Stats &amp; Metrics</button>
+            </div>
+
+            <!-- Tab Content 1: API List -->
+            <div class="api-tab-content active" id="api-tab-list" style="display: flex; flex-direction: column; flex-grow: 1; overflow: hidden; height: 100%;">
+              
+              <!-- Filter Bar (Scrollable horizontally) -->
+              <div class="api-filter-bar" style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.04); scrollbar-width: none; -ms-overflow-style: none;">
+                <button class="filter-pill" data-filter="all">All</button>
+                <button class="filter-pill active" data-filter="with-resp">With Response</button>
+                <button class="filter-pill" data-filter="success">🟢 Success</button>
+                <button class="filter-pill" data-filter="failed">🔴 Failed</button>
+                <button class="filter-pill" data-filter="blank">🟡 Blank</button>
+                <button class="filter-pill" data-filter="slow">🟠 Slow</button>
+                <button class="filter-pill" data-filter="no-resp">No Response</button>
+                <button class="filter-pill" data-filter="4xx">HTTP 4xx</button>
+                <button class="filter-pill" data-filter="5xx">HTTP 5xx</button>
+                <button class="filter-pill" data-filter="longest-time">⏱ Longest Time</button>
+                <button class="filter-pill" data-filter="highest-count">📦 Highest Record</button>
+              </div>
+
+              <!-- Search & Sort Row -->
+              <div class="api-list-header" style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                <div class="search-wrap" style="flex-grow: 1; margin: 0;">
+                  <input class="search-input" type="text" id="api-search-input" placeholder="Search API name, URL, method, status...">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                </div>
+                <select id="api-sort-select" style="background: var(--bg); border: 1px solid var(--border); color: var(--text-light); font-size: 11px; padding: 6px 8px; border-radius: 6px; font-weight: 600; cursor: pointer; outline: none; max-width: 140px;">
+                  <option value="time-desc">⏱ Slowest First</option>
+                  <option value="time-asc">⏱ Fastest First</option>
+                  <option value="count-desc">📦 Highest Records</option>
+                  <option value="count-asc">📦 Lowest Records</option>
+                  <option value="name-asc">🔤 Name (A-Z)</option>
+                  <option value="timestamp-desc">📅 Newest First</option>
+                  <option value="timestamp-asc">📅 Oldest First</option>
+                  <option value="status-asc">🟢 Status Badge</option>
+                </select>
+              </div>
+
+              <div class="api-list" id="api-list-container" style="flex-grow: 1; overflow-y: auto;">
+                <div class="no-data-state">
+                  <p>No API calls loaded</p>
+                </div>
               </div>
             </div>
-            <div class="api-list" id="api-list-container">
-              <div class="no-data-state">
-                <p>No API calls loaded</p>
+
+            <!-- Tab Content 2: Blank Responses -->
+            <div class="api-tab-content" id="api-tab-blank" style="display: none; flex-direction: column; flex-grow: 1; overflow-y: auto;">
+              <div style="font-size: 11px; font-weight: 700; color: #F59E0B; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Blank API Responses</div>
+              <div id="api-blank-container" style="display: flex; flex-direction: column; gap: 8px;">
+                <div class="no-data-state">
+                  <p>No blank responses detected</p>
+                </div>
               </div>
             </div>
+
+            <!-- Tab Content 3: Stats & Metrics -->
+            <div class="api-tab-content" id="api-tab-stats" style="display: none; flex-direction: column; flex-grow: 1; overflow-y: auto;">
+              <div style="font-size: 11px; font-weight: 700; color: #8B5CF6; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">API Performance Metrics</div>
+              <div style="overflow-x: auto; width: 100%;">
+                <table class="group-table" style="width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: left;">
+                  <thead>
+                    <tr style="border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 700;">
+                      <th style="padding: 8px 4px;">API Name</th>
+                      <th style="padding: 8px 4px; text-align: center;">Calls</th>
+                      <th style="padding: 8px 4px; text-align: center;">Avg Latency</th>
+                      <th style="padding: 8px 4px; text-align: center;">Min/Max Time</th>
+                      <th style="padding: 8px 4px; text-align: center;">Success %</th>
+                      <th style="padding: 8px 4px; text-align: center;">Blank %</th>
+                      <th style="padding: 8px 4px; text-align: center;">Failure %</th>
+                    </tr>
+                  </thead>
+                  <tbody id="api-stats-tbody">
+                    <tr><td colspan="7" style="text-align: center; padding: 20px; color: var(--text-muted);">No metrics computed yet.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
 
           <!-- API Details Panel -->
@@ -960,6 +1202,42 @@
               </svg>
               <h3>No Screen Definition or Log Active</h3>
               <p>Upload a Screen JSON file (e.g. <code>WO_COMPLETION.json</code>) and a Log file, or load one of the generic samples from the sidebar to automatically run the Screen Debugger AI.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ INVESTIGATION GRAPH VIEW ═══════════ -->
+      <div class="view" id="view-graph">
+        <div class="view-title">Investigation Flow Graph</div>
+        <div class="view-subtitle">Interactive step-by-step execution flow of the incident context</div>
+        <div style="display:flex; gap:20px; height:calc(100vh - 200px); margin-top:16px;">
+          <!-- Graph Canvas -->
+          <div class="card" style="flex:3; display:flex; flex-direction:column; overflow:hidden; margin-bottom:0;">
+            <div class="card-title">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.5" y1="10.5" x2="15.5" y2="6.5" />
+                <line x1="8.5" y1="13.5" x2="15.5" y2="17.5" />
+              </svg>
+              Interactive Execution Path
+            </div>
+            <div id="graph-canvas-container" style="flex-grow:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; overflow-y:auto; padding:20px; gap:12px; background:rgba(0,0,0,0.15); border-radius:8px;">
+              <!-- Graph nodes will be dynamically rendered here -->
+            </div>
+          </div>
+
+          <!-- Node Detail Panel -->
+          <div class="card" style="flex:1.5; display:flex; flex-direction:column; margin-bottom:0; min-width:300px; border-left:1px solid var(--border);">
+            <div class="card-title" style="color:var(--primary);">
+              🕵 Node Details Inspector
+            </div>
+            <div id="graph-node-details" style="flex-grow:1; overflow-y:auto; font-size:13px; color:var(--text-normal); display:flex; flex-direction:column; gap:12px;">
+              <div style="text-align:center; padding:40px 20px; color:var(--text-muted);">
+                Click on any node in the execution path to inspect its logs, payload, and code.
+              </div>
             </div>
           </div>
         </div>
@@ -1028,6 +1306,9 @@
               <button class="quick-q-btn" onclick="askQuestion('What HTTP errors are there?')">🌐 HTTP Errors</button>
               <button class="quick-q-btn" onclick="askQuestion('Are there any security risks?')">🔐 Security
                 Risks</button>
+              <!-- Brain-powered queries -->
+              <button class="quick-q-btn" onclick="askQuestion('Brain investigate APIs')" style="background:rgba(139,92,246,0.12);border-color:rgba(139,92,246,0.3);color:#A78BFA;">🧠 Brain API Analysis</button>
+              <button class="quick-q-btn" onclick="askQuestion('Full brain investigation')" style="background:rgba(139,92,246,0.12);border-color:rgba(139,92,246,0.3);color:#A78BFA;">🧠 Full L3 Investigation</button>
             </div>
           </div>
 
@@ -1050,19 +1331,24 @@
   </div>
 
   <!-- Script View Modal -->
-  <div id="screen-script-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10001; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
-    <div style="background:#1E293B; border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:24px; width:90%; max-width:700px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
+  <div id="screen-script-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.85); z-index:10001; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+    <div style="background:#1E293B; border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:24px; width:90%; max-width:850px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px;">
-        <h3 id="script-modal-title" style="margin:0; color:#F8FAFC; font-size:16px;">Script Viewer</h3>
-        <button onclick="closeScriptModal()" style="background:transparent; border:none; color:#94A3B8; cursor:pointer; font-size:18px;">&times;</button>
+        <h3 id="script-modal-title" style="margin:0; color:#F8FAFC; font-size:16px; font-weight:600;">Script Viewer</h3>
+        <div style="display:flex; gap:8px;">
+          <button id="download-script-btn" onclick="downloadModalScript()" style="background:#10B98115; border:1px solid #10B98150; border-radius:6px; color:#34D399; font-size:11px; padding:5px 10px; cursor:pointer; font-weight:600; font-family:sans-serif; transition:all 0.15s;" onmouseover="this.style.backgroundColor='#10B98130'" onmouseout="this.style.backgroundColor='#10B98115'">⬇ Download</button>
+          <button id="copy-script-btn" onclick="copyModalScript()" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#E2E8F0; font-size:11px; padding:5px 10px; cursor:pointer; font-weight:600; font-family:sans-serif; transition:all 0.15s;" onmouseover="this.style.backgroundColor='rgba(255,255,255,0.1)'" onmouseout="this.style.backgroundColor='rgba(255,255,255,0.05)'">📋 Copy</button>
+          <button onclick="closeScriptModal()" style="background:transparent; border:none; color:#94A3B8; cursor:pointer; font-size:18px; padding-left:8px;">&times;</button>
+        </div>
       </div>
-      <div style="position:relative; flex-grow:1; max-height:400px; overflow-y:auto; background:#0F172A; border-radius:8px; border:1px solid rgba(255,255,255,0.06); padding:16px;">
-        <button id="copy-script-btn" onclick="copyModalScript()" style="position:absolute; top:8px; right:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:#E2E8F0; font-size:11px; padding:4px 8px; cursor:pointer; font-weight:600; font-family:sans-serif;">Copy</button>
-        <pre id="script-modal-code" style="margin:0; color:#38BDF8; font-family:'Fira Code', monospace; font-size:12px; white-space:pre-wrap; word-break:break-all; line-height:1.5;"></pre>
+      <div style="position:relative; flex-grow:1; height:450px; min-height:450px; background:#0F172A; border-radius:8px; border:1px solid rgba(255,255,255,0.06); padding:4px;">
+        <div id="script-modal-editor-container" style="width:100%; height:100%;"></div>
+        <!-- Fallback standard pre block -->
+        <pre id="script-modal-code" style="display:none; margin:0; color:#38BDF8; font-family:'Fira Code', monospace; font-size:12px; white-space:pre-wrap; word-break:break-all; line-height:1.5; padding:12px; height:100%; overflow-y:auto;"></pre>
       </div>
       <!-- Open in Editor bar -->
       <div style="display:flex; align-items:center; gap:10px; background:#0F172A; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 14px; flex-wrap:wrap;">
-        <span style="color:#94A3B8; font-size:12px; white-space:nowrap;">📂 Open in:</span>
+        <span style="color:#94A3B8; font-size:12px; white-space:nowrap;">📂 Open in local editor:</span>
         <select id="editor-choice-select" style="flex:1; min-width:130px; background:#1E293B; color:#E2E8F0; border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:5px 8px; font-size:12px; cursor:pointer;">
           <option value="notepad">Notepad</option>
           <option value="notepadpp">Notepad++</option>
@@ -1089,6 +1375,7 @@
   </div>
 
   <script src="sample_logs.js?v=debugger_v3"></script>
+  <script src="logradar-brain.js?v=brain_v1"></script>
   <script src="app.js?v=debugger_v3"></script>
 </body>
 
