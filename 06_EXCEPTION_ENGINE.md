@@ -1,0 +1,10 @@
+# Exception Engine
+
+Investigate:
+NullPointerException
+TargetError
+EvalError
+JSONException
+SQLException
+SocketTimeoutException
+IndexOutOfBoundsException
