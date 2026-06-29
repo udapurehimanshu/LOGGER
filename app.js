@@ -1043,17 +1043,41 @@ function extractAPIs(text) {
             const parsedJson = JSON.parse(tState.jsonBuffer);
             if (parsedJson.count !== undefined) {
               tState.api.recordCount = parsedJson.count;
+            } else if (parsedJson.totalResults !== undefined) {
+              tState.api.recordCount = parsedJson.totalResults;
             } else if (Array.isArray(parsedJson.items)) {
               tState.api.recordCount = parsedJson.items.length;
+            } else if (parsedJson.records !== undefined) {
+              tState.api.recordCount = parsedJson.records;
             }
             
             if (parsedJson.links && Array.isArray(parsedJson.links)) {
               const mainLink = parsedJson.links[0];
               if (mainLink && mainLink.href) {
                 tState.api.endpoint = mainLink.href;
+                try {
+                  const parts = mainLink.href.split('?')[0].split('/').filter(Boolean);
+                  if (parts.length) {
+                    tState.api.name = parts[parts.length - 1].toUpperCase() + "_WS";
+                  }
+                } catch(err) {}
               }
             }
-          } catch(e) {}
+          } catch(e) {
+            const countM = tState.jsonBuffer.match(/"count"\s*:\s*(\d+)/i) || tState.jsonBuffer.match(/"totalResults"\s*:\s*(\d+)/i);
+            if (countM) tState.api.recordCount = parseInt(countM[1]);
+            
+            const hrefM = tState.jsonBuffer.match(/"href"\s*:\s*"([^"]+)"/);
+            if (hrefM) {
+              tState.api.endpoint = hrefM[1];
+              try {
+                const parts = hrefM[1].split('?')[0].split('/').filter(Boolean);
+                if (parts.length) {
+                  tState.api.name = parts[parts.length - 1].toUpperCase() + "_WS";
+                }
+              } catch(err) {}
+            }
+          }
           
           finalizeAndPush(tState.api);
           tState.state = 'IDLE';
